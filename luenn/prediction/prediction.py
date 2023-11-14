@@ -1,7 +1,9 @@
+import numpy as np
+import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import torch
-import numpy as np
+
+
 def analyse(model,x_sim,param):
 	batch_size = param.HyperParameter.batch_size
 	dataset_test = torch.utils.data.TensorDataset(x_sim)

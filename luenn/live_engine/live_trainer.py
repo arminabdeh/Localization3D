@@ -1,10 +1,8 @@
-import time
 import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
 import pandas as pd
 from luenn.utils import load_model
@@ -14,6 +12,22 @@ from luenn.model.model import UNet
 from torch.utils.tensorboard import SummaryWriter
 from luenn.localization import localizer_machine
 from luenn.evaluate import reg_classification
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.optim import lr_scheduler
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
+from luenn.evaluate import reg_classification
+from luenn.generic import fly_simulator
+from luenn.localization import localizer_machine
+from luenn.model.model import UNet
+from luenn.utils import load_model
+
 
 class training_stream(Dataset):
 	def __init__(self, param,simulator):

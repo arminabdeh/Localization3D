@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 
-
 def label_dist(xm, ym, box_size):
 	mu = [2.+xm, 2.+ym]  
 	sigma = [1.0, 1.0]  

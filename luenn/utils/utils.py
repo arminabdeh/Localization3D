@@ -1,7 +1,9 @@
-import torch
-from luenn.model.model import UNet
-import pandas as pd
 import numpy as np
+import pandas as pd
+import torch
+
+from luenn.model.model import UNet
+
 
 def load_model(dir):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

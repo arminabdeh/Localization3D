@@ -1,6 +1,8 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 from torchsummary import summary
+
+
 # I want to modify this model in order tonn.ReLU(inplace=True) function and number of channels as parameters
 # I want to add a decoder to this model
 

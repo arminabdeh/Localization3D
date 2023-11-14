@@ -1,12 +1,10 @@
-from torch.utils.data import Dataset
 import decode
-from decode.neuralfitter.train.random_simulation import setup_random_simulation
-import torch
-import pandas as pd
 import numpy as np
 import torch
-from luenn.utils.utils import dec_luenn_gt_transform
+from decode.neuralfitter.train.random_simulation import setup_random_simulation
+
 from luenn.generic.label_generator import label_generator
+from luenn.utils.utils import dec_luenn_gt_transform
 
 
 class fly_simulator:

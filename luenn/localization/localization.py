@@ -1,12 +1,14 @@
+import os
+
 import numpy as np
-import torch
-import scipy
-from skimage.feature import peak_local_max
 import pandas as pd
+import scipy
+import torch
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+from skimage.feature import peak_local_max
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from datetime import datetime
 
