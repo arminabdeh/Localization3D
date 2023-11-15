@@ -1,7 +1,27 @@
-
+import setuptools
 from setuptools import setup
+# requirements = [
+#     "numpy",
+#     "torch",
+#     "click",
+#     "deprecated",
+#     "gitpython>=3.1",
+#     "h5py",
+#     "importlib_resources",
+#     "matplotlib",
+#     "pandas",
+#     "pytest",
+#     "pyyaml",
+#     "requests",
+#     "scipy",
+#     "seaborn==0.10",
+#     "scikit-image",
+#     "scikit-learn",
+#     "tensorboard",
+#     "tifffile",
+#     "tqdm",
+# ]
 requirements = []
-
 setup(
     name='luenn',
     version='0.10.02',
@@ -12,5 +32,11 @@ setup(
     license='UB',
     author='Armin Abdehkakha',
     author_email='arminabd@buffalo.edu',
-    description=''
+    description='luenn is a python package for the analysis of super resolution microscopy data, localization uncertainty estimation, and neural network training.',
+    long_description=open('README.md').read(),
+    url='',
+    classifiers=[
+        'Programming Language :: Python :: 3.7',
+    ],
+
 )

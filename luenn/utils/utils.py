@@ -5,11 +5,11 @@ import torch
 from luenn.model.model import UNet
 
 
-def load_model(dir):
+def load_model(dir_model):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet()
     model.to(device)
-    loaded_model = torch.load(dir)
+    loaded_model = torch.load(dir_model)
     if isinstance(loaded_model, dict):
         print(f"It's a state_dict saved at epoch {loaded_model['epoch']}")
         checkpoint = loaded_model['model_state_dict']
