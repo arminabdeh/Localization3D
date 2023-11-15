@@ -113,8 +113,6 @@ class UNet(nn.Module):
 	def forward(self, x):
 		enc_skip = []
 		for i, layer in enumerate(self.enc.children()):
-			print(i)
-			print(layer)
 			x = layer(x)
 			if i in {5,12,25}:
 				enc_skip.append(x)

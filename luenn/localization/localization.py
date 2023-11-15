@@ -1,15 +1,15 @@
 import os
-
 import numpy as np
+np.seterr(divide='ignore')
+np.seterr(invalid='ignore')
+
 import pandas as pd
 import scipy
 import torch
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 from skimage.feature import peak_local_max
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
 from datetime import datetime
 
 def generate_unique_filename(f,prefix="localization_result", extension=".csv"):
@@ -19,11 +19,15 @@ def generate_unique_filename(f,prefix="localization_result", extension=".csv"):
 
 
 class localizer_machine:
-	def __init__(self, param,psfs,GT=[]):
+	def __init__(self, param,psfs,GT=[],save=None):
 		self.param = param
 		self.psfs = psfs
 		self.GT = GT
-		self.save  = self.param.post_processing.localization.save
+		if save is None:
+			self.save = self.param.post_processing.localization.save
+		else:
+			self.save = save
+
 		self.skip = self.param.post_processing.localization.skip
 		self.norm_peak = self.param.Simulation.scale_factor
 		self.z_range = self.param.Simulation.z_range	
@@ -48,6 +52,7 @@ class localizer_machine:
 		return mu, sig_nm
 	@staticmethod
 	def calculate_entropy(sigma_x, sigma_y, sigma_z):
+		# how ignore warning of division by zero?
 		entropy2d = 0.5 * np.log2(2 * np.pi * np.e * sigma_x**2 * sigma_y**2)
 		entropy3d = 0.5 * (np.log2((2 * np.pi * np.e ) ** 3 * sigma_x * sigma_y * sigma_z))
 		return entropy2d,entropy3d
@@ -277,6 +282,7 @@ class localizer_machine:
 				
 				saved_directory = os.path.join(path, generate_unique_filename(loc_dataset.frame_id.max()))
 				GtPr_frame.to_csv(saved_directory)
+				print()
 				print('localization is done. File has been saved in log directory')
 			return loc_dataset
 		except Exception as e:

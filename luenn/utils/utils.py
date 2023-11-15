@@ -4,6 +4,10 @@ import torch
 
 from luenn.model.model import UNet
 
+def generate_unique_filename(f,prefix="localization_result", extension=".csv"):
+    timestamp = datetime.now().strftime("%Y.%m.%d")
+    unique_filename = f"{prefix}_{timestamp}_{str(f)}xframe{extension}"
+    return unique_filename
 
 def load_model(dir_model):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -11,7 +15,7 @@ def load_model(dir_model):
     model.to(device)
     loaded_model = torch.load(dir_model)
     if isinstance(loaded_model, dict):
-        print(f"It's a state_dict saved at epoch {loaded_model['epoch']}")
+        print(f"It's a state_dict saved at epoch {loaded_model['epoch']} with lr {loaded_model['lr_scheduler_state_dict']}")
         checkpoint = loaded_model['model_state_dict']
     else:
         checkpoint = loaded_model.state_dict()

@@ -4,7 +4,7 @@ import numpy as np
 class reg_classification:
 	def __init__(self, res_loc):
 		self.res_loc = res_loc
-		if res_loc.empty:
+		if res_loc.empty == True or 'TP' not in res_loc.label.unique():
 			self.GT = 0
 			self.TP = 0
 			self.FP = 0
@@ -42,6 +42,8 @@ class reg_classification:
 	def f1_score(self):
 		pre = self.precision()
 		rec = self.recall()
+		if pre + rec == 0:
+			return 0.
 		f1 = (2 * pre * rec) / (pre + rec)
 		return f1
 

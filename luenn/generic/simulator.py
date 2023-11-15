@@ -31,7 +31,7 @@ class fly_simulator:
 		total_seeds = len(gt)
 		total_frames = gt.frame_id.max()
 		if self.report:
-			print('Test data summary:')
+			print('Train data summary:')
 			print(f'total seeds are {total_seeds}')
 			print(f'total frames are {total_frames}')
 			print(f'Average seeds/frame is {total_seeds/total_frames}')
