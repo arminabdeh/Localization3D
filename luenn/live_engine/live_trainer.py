@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import torch
@@ -9,11 +11,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+
 from luenn.evaluate import reg_classification
 from luenn.generic import fly_simulator
 from luenn.localization import localizer_machine
 from luenn.model.model import UNet
-from datetime import datetime
+
 
 class training_stream(Dataset):
     def __init__(self, param,simulator):

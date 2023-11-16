@@ -2,7 +2,7 @@ import setuptools
 from setuptools import setup
 # requirements = [
 #     "numpy",
-#     "torch",
+#     "pytorch",
 #     "click",
 #     "deprecated",
 #     "gitpython>=3.1",
@@ -19,7 +19,7 @@ from setuptools import setup
 #     "scikit-learn",
 #     "tensorboard",
 #     "tifffile",
-#     "tqdm",
+#     "tqdm", "decode",
 # ]
 requirements = []
 setup(
@@ -36,7 +36,6 @@ setup(
     long_description=open('README.md').read(),
     url='',
     classifiers=[
-        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
-
 )

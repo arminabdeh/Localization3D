@@ -1,5 +1,7 @@
 import os
+
 import numpy as np
+
 np.seterr(divide='ignore')
 np.seterr(invalid='ignore')
 

@@ -4,6 +4,7 @@ import torch
 
 from luenn.model.model import UNet
 
+
 def generate_unique_filename(f,prefix="localization_result", extension=".csv"):
     timestamp = datetime.now().strftime("%Y.%m.%d")
     unique_filename = f"{prefix}_{timestamp}_{str(f)}xframe{extension}"
