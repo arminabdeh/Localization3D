@@ -1,6 +1,4 @@
 
-code: https://github.com/arminabdeh/Localization3D/archive/refs/heads/smlm.zip
-
 wheels:
   luenn: https://github.com/arminabdeh/Localization3D/releases/download/colab_release/luenn-0.10.2-py3-none-any.whl
   decode: https://github.com/TuragaLab/DECODE/releases/download/v0.10.2/decode-0.10.2-py3-none-any.whl
