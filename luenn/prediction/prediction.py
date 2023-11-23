@@ -4,15 +4,15 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
-def analyse(model,x_sim,param):
+def analyse(model, x_sim, param):
 	batch_size = param.HyperParameter.batch_size
 	dataset_test = torch.utils.data.TensorDataset(x_sim)
-	dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False,pin_memory=True)
+	dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, pin_memory=True)
 	model.eval()
 	steps = len(dataloader_test)
 	tqdm_enum = tqdm(total=steps, smoothing=0.)
 	loc_file = None
-	with torch.no_grad():           
+	with torch.no_grad():
 		for inputs in dataloader_test:
 			outputs = model(inputs[0].cuda())
 			inputs = inputs[0].cpu()

@@ -5,61 +5,64 @@ import torch
 from luenn.model.model import UNet
 
 
-def generate_unique_filename(f,prefix="localization_result", extension=".csv"):
-    timestamp = datetime.now().strftime("%Y.%m.%d")
-    unique_filename = f"{prefix}_{timestamp}_{str(f)}xframe{extension}"
-    return unique_filename
+def generate_unique_filename(f, prefix="localization_result", extension=".csv"):
+	timestamp = datetime.now().strftime("%Y.%m.%d")
+	unique_filename = f"{prefix}_{timestamp}_{str(f)}xframe{extension}"
+	return unique_filename
+
 
 def load_model(dir_model):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNet()
-    model.to(device)
-    loaded_model = torch.load(dir_model)
-    if isinstance(loaded_model, dict):
-        print(f"It's a state_dict saved at epoch {loaded_model['epoch']} with lr {loaded_model['lr_scheduler_state_dict']}")
-        checkpoint = loaded_model['model_state_dict']
-    else:
-        checkpoint = loaded_model.state_dict()
-    model.load_state_dict(checkpoint)
-    return model
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	model = UNet()
+	model.to(device)
+	loaded_model = torch.load(dir_model)
+	if isinstance(loaded_model, dict):
+		print(
+			f"It's a state_dict saved at epoch {loaded_model['epoch']} with lr {loaded_model['lr_scheduler_state_dict']}")
+		checkpoint = loaded_model['model_state_dict']
+	else:
+		checkpoint = loaded_model.state_dict()
+	model.load_state_dict(checkpoint)
+	return model
 
 
 def dec_luenn_gt_transform(tar_em):
-    xyz = tar_em.xyz_px.numpy().tolist()
-    frame_id = tar_em.frame_ix.numpy().tolist()
-    photons = tar_em.phot.numpy().tolist()
-    GT = pd.DataFrame({'xyz': xyz, 'frame_id': frame_id, 'photons': photons})
+	xyz = tar_em.xyz_px.numpy().tolist()
+	frame_id = tar_em.frame_ix.numpy().tolist()
+	photons = tar_em.phot.numpy().tolist()
+	GT = pd.DataFrame({'xyz': xyz, 'frame_id': frame_id, 'photons': photons})
 
-    GT_list = []
+	GT_list = []
 
-    for f in range(GT['frame_id'].max() + 1):
-        frame_gt = GT[GT['frame_id'] == f]
+	for f in range(GT['frame_id'].max() + 1):
+		frame_gt = GT[GT['frame_id'] == f]
 
-        for nn, (xyz_data, photon) in enumerate(
-                zip(frame_gt['xyz'], frame_gt['photons'])):
-            GT_frame = {
-                'frame_id': f + 1,
-                'seed_id': nn + 1,
-                'X_tr_px': xyz_data[0],
-                'Y_tr_px': xyz_data[1],
-                'X_tr_nm': xyz_data[0] * 100.0,
-                'Y_tr_nm': xyz_data[1] * 100.0,
-                'Z_tr_nm': xyz_data[2],
-                'photons': photon
-            }
-            GT_list.append(GT_frame)
+		for nn, (xyz_data, photon) in enumerate(
+				zip(frame_gt['xyz'], frame_gt['photons'])):
+			GT_frame = {
+				'frame_id': f + 1,
+				'seed_id': nn + 1,
+				'X_tr_px': xyz_data[0],
+				'Y_tr_px': xyz_data[1],
+				'X_tr_nm': xyz_data[0] * 100.0,
+				'Y_tr_nm': xyz_data[1] * 100.0,
+				'Z_tr_nm': xyz_data[2],
+				'photons': photon
+			}
+			GT_list.append(GT_frame)
 
-    GT_Frames = pd.DataFrame(GT_list)
-    return GT_Frames
+	GT_Frames = pd.DataFrame(GT_list)
+	return GT_Frames
+
 
 def complex_real_map(x):
-    if x.ndim == 4:
-        xnorm = np.zeros((x.shape[0],x.shape[1],x.shape[2]))
-        for i in range(x.shape[0]):
-            xnorm[i]+= (x[i,:,:,0]**2+x[i,:,:,1]**2)**.5
-        return xnorm
-    else:
-        return (x[:,:,0]**2+x[:,:,1]**2)**.5
+	if x.ndim == 4:
+		xnorm = np.zeros((x.shape[0], x.shape[1], x.shape[2]))
+		for i in range(x.shape[0]):
+			xnorm[i] += (x[i, :, :, 0] ** 2 + x[i, :, :, 1] ** 2) ** .5
+		return xnorm
+	else:
+		return (x[:, :, 0] ** 2 + x[:, :, 1] ** 2) ** .5
 # import decode
 # import pkg_resources
 # import os

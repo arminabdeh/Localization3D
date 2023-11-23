@@ -12,4 +12,3 @@ class TestModel(unittest.TestCase):
 		device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 		model.to(device)
 		self.assertEqual(True, True)
-

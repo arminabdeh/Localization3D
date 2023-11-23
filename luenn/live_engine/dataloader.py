@@ -5,8 +5,8 @@ from package.utils import utils
 
 class LabelGenerator:
 	def label_dist(xm, ym, box_size=5):
-		mu = [2.+xm, 2.+ym]  
-		sigma = [1.0, 1.0]  
+		mu = [2.+xm, 2.+ym]
+		sigma = [1.0, 1.0]
 		x, y = np.meshgrid(np.arange(box_size), np.arange(box_size))
 		gaussian = np.exp(-((x - mu[0])**2 / (2 * sigma[0]**2) + (y - mu[1])**2 / (2 * sigma[1]**2)))
 		gaussian_norm = gaussian/np.sum(gaussian)
@@ -38,14 +38,14 @@ class LabelGenerator:
 				if 2 < xi < 253 and 2 < yj < 253:
 					z_true = xyz[n][2]
 					zr = np.pi * ((z_true + (0.5 * z_range)) / z_range)
-					
+
 					channel_1 = np.array(scale_factor*dist_unit * np.cos(zr)) #cos
 					channel_2 = np.array(scale_factor*dist_unit * np.sin(zr)) #sin
 					channel_3 = dist_norm*phot[n] #intensity
-					
+
 					left_side  = box_size // 2
 					right_side = left_side + 1
-					
+
 					Y_train[f, 0, xi - left_side:xi + right_side, yj - left_side:yj + right_side] += channel_1
 					Y_train[f, 1, xi - left_side:xi + right_side, yj - left_side:yj + right_side] += channel_2
 					Y_train[f, 2, xi - left_side:xi + right_side, yj - left_side:yj + right_side] += channel_3
@@ -67,7 +67,7 @@ class Simulator:
 		x_sim = torch.unsqueeze(sim_frames, 1)
 		# Convert to float and move to GPU (if available)
 		x_sim = x_sim.cpu()
-		
+
 		gt = utils.dec_luenn_gt_transform(tar_em)
 		total_seeds = len(gt)
 		total_frames = gt.frame_id.max()
