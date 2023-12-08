@@ -15,7 +15,7 @@ def analyse(model, x_sim, param):
 	with torch.no_grad():
 		for inputs in dataloader_test:
 			outputs = model(inputs[0].cuda())
-			inputs = inputs[0].cpu()
+			inputs[0].cpu()
 			temp_out = np.moveaxis(outputs.cpu().numpy(), 1, -1)
 			loc_file = temp_out if loc_file is None else np.concatenate((loc_file, temp_out), axis=0)
 			torch.cuda.empty_cache()

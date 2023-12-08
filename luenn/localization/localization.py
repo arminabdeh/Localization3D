@@ -1,41 +1,67 @@
 import os
-
 import numpy as np
-
-np.seterr(divide='ignore')
-np.seterr(invalid='ignore')
-
 import pandas as pd
-import scipy
+from scipy.ndimage import label as nd_label
 import torch
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 from skimage.feature import peak_local_max
-
+from luenn.utils import generate_unique_filename
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-from datetime import datetime
+np.seterr(divide='ignore')
+np.seterr(invalid='ignore')
 
-
-def generate_unique_filename(f, prefix="localization_result", extension=".csv"):
-	timestamp = datetime.now().strftime("%Y.%m.%d")
-	unique_filename = f"{prefix}_{timestamp}_{str(f)}xframe{extension}"
-	return unique_filename
 
 
 class localizer_machine:
-	def __init__(self, param, psfs, GT=[], save=None):
+	def __init__(self, param, psfs, GT=None, save=None):
 		self.param = param
+		if self.param.architecture.output_channels == 2:
+			self.photon_head = False
+			self.threshold_photons = -1
+		else:
+			self.photon_head = True
+			self.threshold_photons = self.param.post_processing.localization.threshold_photons
+
+		if isinstance(psfs, list):
+			psfs = np.array(psfs)
+		if torch.is_tensor(psfs):
+			psfs = np.moveaxis(psfs.cpu().numpy(), 1, -1)
+		psfs = psfs.astype(np.float64)
 		self.psfs = psfs
 		self.GT = GT
 		if save is None:
-			self.save = self.param.post_processing.localization.save
+			if self.param.post_processing.localization.save is None:
+				self.save = False
+			else:
+				self.save = self.param.post_processing.localization.save
 		else:
 			self.save = save
 
 		self.skip = self.param.post_processing.localization.skip
 		self.norm_peak = self.param.Simulation.scale_factor
 		self.z_range = self.param.Simulation.z_range
-
+		self.threshold_freq_sum = self.param.post_processing.localization.threshold_freq_sum
+		self.threshold_freq_max = self.param.post_processing.localization.threshold_freq_max
+		self.threshold_clean = param.post_processing.localization.threshold_clean
+		self.threshold_abs = param.post_processing.localization.threshold_abs
+		self.threshold_distance = param.post_processing.localization.threshold_distance
+		self.radius_lat = param.post_processing.localization.radius_lat
+		self.radius_axi = param.post_processing.localization.radius_axi
+		self.radius_phot = param.post_processing.localization.radius_phot
+		self.eps = param.post_processing.localization.epsilon
+		if self.skip:
+			self.i_skip_min = int(4 * param.post_processing.domain_pool[0][0])
+			self.i_skip_max = int(4 * param.post_processing.domain_pool[0][1])
+			self.j_skip_min = int(4 * param.post_processing.domain_pool[1][0])
+			self.j_skip_max = int(4 * param.post_processing.domain_pool[1][1])
+		else:
+			self.i_skip_min = max(self.radius_lat, self.radius_axi)
+			self.i_skip_max = 255-max(self.radius_lat, self.radius_axi)
+			self.j_skip_min = max(self.radius_lat, self.radius_axi)
+			self.j_skip_max = 255-max(self.radius_lat, self.radius_axi)
+		self.x_px_size = param.Camera.px_size[0]
+		self.y_px_size = param.Camera.px_size[1]
 	@staticmethod
 	def centroid(x, w, px_size):
 		w1 = w[0]
@@ -44,12 +70,13 @@ class localizer_machine:
 		x1 = x[0]
 		x2 = x[1]
 		x3 = x[2]
-		t1 = w1 ** ((x3 ** 2) - (x2 ** 2))
-		t2 = w2 ** ((x1 ** 2) - (x3 ** 2))
-		t3 = w3 ** ((x2 ** 2) - (x1 ** 2))
-		t4 = w1 ** (x3 - x2)
-		t5 = w2 ** (x1 - x3)
-		t6 = w3 ** (x2 - x1)
+		# replace all ** with np.power
+		t1 = np.power(w1, np.power(x3, 2) - np.power(x2, 2))
+		t2 = np.power(w2, np.power(x1, 2) - np.power(x3, 2))
+		t3 = np.power(w3, np.power(x2, 2) - np.power(x1, 2))
+		t4 = np.power(w1, x3 - x2)
+		t5 = np.power(w2, x1 - x3)
+		t6 = np.power(w3, x2 - x1)
 		mu = 0.5 * (np.log2(t1 * t2 * t3)) / np.log2(t4 * t5 * t6)
 		sig = (max(0.5 * ((x1 - x3) * (x2 - x1) * (x3 - x2) / np.log2(t4 * t5 * t6)), 0)) ** .5
 		sig_nm = (px_size / 4.) * abs(sig - 0.83065387)
@@ -57,7 +84,6 @@ class localizer_machine:
 
 	@staticmethod
 	def calculate_entropy(sigma_x, sigma_y, sigma_z):
-		# how ignore warning of division by zero?
 		entropy2d = 0.5 * np.log2(2 * np.pi * np.e * sigma_x ** 2 * sigma_y ** 2)
 		entropy3d = 0.5 * (np.log2((2 * np.pi * np.e) ** 3 * sigma_x * sigma_y * sigma_z))
 		return entropy2d, entropy3d
@@ -85,6 +111,7 @@ class localizer_machine:
 			# Find matching pairs based on 3D distances
 			dist_matrix = np.sqrt(np.sqrt(cost3D))
 			tr_id, pr_id = linear_sum_assignment(dist_matrix)
+
 			# Initialize results list
 			Results = []
 
@@ -120,125 +147,102 @@ class localizer_machine:
 
 	def seed_candidate_3D(self, psf):
 		try:
-			# initialize
-			if self.skip:
-				i_skip_min = int(4 * self.param.post_processing.domain_pool[0][0])
-				i_skip_max = int(4 * self.param.post_processing.domain_pool[0][1])
-				j_skip_min = int(4 * self.param.post_processing.domain_pool[1][0])
-				j_skip_max = int(4 * self.param.post_processing.domain_pool[1][1])
-			else:
-				i_skip_min = 2
-				i_skip_max = 253
-				j_skip_min = 2
-				j_skip_max = 253
-			x_px_size = self.param.Camera.px_size[0]
-			y_px_size = self.param.Camera.px_size[1]
-			threshold_clean = self.param.post_processing.localization.threshold_clean
-			threshold_abs = self.param.post_processing.localization.threshold_abs
-			threshold_distance = self.param.post_processing.localization.threshold_distance
-			radius_lat = self.param.post_processing.localization.radius_lat
-			radius_axi = self.param.post_processing.localization.radius_axi
-			radius_phot = self.param.post_processing.localization.radius_phot
-			eps = self.param.post_processing.localization.epsilon
 			# processing
-			psfs_cos = psf[:, :, 0]
-			psfs_sin = psf[:, :, 1]
-			psfs_phot = psf[:, :, 2]
+			psfs_cos = psf[:, :, 0] / self.norm_peak
+			psfs_sin = psf[:, :, 1] / self.norm_peak
+			if self.photon_head:
+				psfs_phot = psf[:, :, 2]
+			else:
+				intensity = 0
+				psfs_phot = np.array([])
 			psfs_norm = np.sqrt(np.square(psfs_cos) + np.square(psfs_sin))
-			psfs_Z = np.arccos(np.divide(psfs_cos, psfs_norm + eps)) / np.pi
-			psfs_norm_unit = psfs_norm / self.norm_peak
-			psfs_norm_clean = np.where(psfs_norm <= threshold_clean, 0, psfs_norm)
-			label, features = scipy.ndimage.label(psfs_norm_clean)
-			local_maximals = peak_local_max(psfs_norm, threshold_abs=threshold_abs, exclude_border=True,
-											min_distance=threshold_distance, labels=label)
+			psfs_Z = np.arccos(np.divide(psfs_cos, psfs_norm + self.eps)) / np.pi
+			psfs_norm_unit = psfs_norm
+			psfs_norm_clean = np.where(psfs_norm <= self.threshold_clean, 0, psfs_norm)
+			label, features = nd_label(psfs_norm_clean)
+			local_maximals = peak_local_max(psfs_norm, threshold_abs=self.threshold_abs, exclude_border=True,
+											min_distance=self.threshold_distance, labels=label)
 			count_detected = len(local_maximals)
 			candidates = []
 			for local_maximal in local_maximals:
 				Id_i, Id_j = local_maximal
-				if Id_i >= i_skip_min and Id_i <= i_skip_max and Id_j >= j_skip_min and Id_j <= j_skip_max:
+				if Id_i >= self.i_skip_min and Id_i <= self.i_skip_max and Id_j >= self.j_skip_min and Id_j <= self.j_skip_max:
 					I_max = psfs_norm_unit[Id_i, Id_j]
 					I_sum = psfs_norm_unit[Id_i, Id_j]
 					I_sum += psfs_norm_unit[Id_i - 1, Id_j]
 					I_sum += psfs_norm_unit[Id_i + 1, Id_j]
 					I_sum += psfs_norm_unit[Id_i, Id_j - 1]
 					I_sum += psfs_norm_unit[Id_i, Id_j + 1]
+					if I_max>=self.threshold_freq_max or I_sum>=self.threshold_freq_sum:
 
-					Dist_X = [psfs_norm_unit[Id_i - radius_lat, Id_j], psfs_norm_unit[Id_i, Id_j],
-							  psfs_norm_unit[Id_i + radius_lat, Id_j]]
-					Dist_Y = [psfs_norm_unit[Id_i, Id_j - radius_lat], psfs_norm_unit[Id_i, Id_j],
-							  psfs_norm_unit[Id_i, Id_j + radius_lat]]
-					x_correction, sig_x = self.centroid([-1 * radius_lat, 0., radius_lat], Dist_X, x_px_size)
-					y_correction, sig_y = self.centroid([-1 * radius_lat, 0., radius_lat], Dist_Y, y_px_size)
-					sig_z = self.z_range * np.std(
-						psfs_Z[Id_i - radius_axi:Id_i + radius_axi + 1, Id_j - radius_axi:Id_j + radius_axi + 1])
-					entropy2d, entropy3d = self.calculate_entropy(sig_x, sig_y, sig_z)
-					sig_xyz = np.sqrt(sig_x ** 2 + sig_y ** 2 + sig_z ** 2)
-					X_px = (y_correction + Id_j) / 4.
-					Y_px = (x_correction + Id_i) / 4.
-					z_pi = np.average(
-						psfs_Z[Id_i - radius_axi:Id_i + radius_axi + 1, Id_j - radius_axi:Id_j + radius_axi + 1],
-						weights=psfs_norm_unit[Id_i - radius_axi:Id_i + radius_axi + 1,
-								Id_j - radius_axi:Id_j + radius_axi + 1])
-					Z_nm = (z_pi * self.z_range) - (0.5000 * self.z_range)
-					phot_modif = list(psfs_phot[Id_i - radius_phot:Id_i + radius_phot + 1,
-									  Id_j - radius_phot:Id_j + radius_phot + 1].flatten())
-					phot_modif.sort()
-					intensity = np.sum(phot_modif[-int(radius_phot ** 2):])
+						Dist_X = [psfs_norm_unit[Id_i - self.radius_lat, Id_j], psfs_norm_unit[Id_i, Id_j],
+								  psfs_norm_unit[Id_i + self.radius_lat, Id_j]]
+						Dist_Y = [psfs_norm_unit[Id_i, Id_j - self.radius_lat], psfs_norm_unit[Id_i, Id_j],
+								  psfs_norm_unit[Id_i, Id_j + self.radius_lat]]
 
-					candidates.append({
-						'X_pr_px': X_px,
-						'Y_pr_px': Y_px,
-						'X_pr_nm': X_px * x_px_size,
-						'Y_pr_nm': Y_px * y_px_size,
-						'Z_pr_nm': Z_nm,
-						'Id_i': Id_i,
-						'Id_j': Id_j,
-						'prob': I_max,
-						'Freq_max': I_max,
-						'Freq_sum': I_sum,
-						'photons_pred': intensity,
-						'sig_x': sig_x,
-						'sig_y': sig_y,
-						'sig_z': sig_z,
-						'sig_xyz': sig_xyz,
-						'entropy2d': entropy2d,
-						'entropy3d': entropy3d})
-				# uncertainty and probability of prediciton should be added here
-				data_candids = pd.DataFrame(candidates)
+						x_correction, sig_x = self.centroid([-1 * self.radius_lat, 0., self.radius_lat], Dist_X, self.x_px_size)
+						y_correction, sig_y = self.centroid([-1 * self.radius_lat, 0., self.radius_lat], Dist_Y, self.y_px_size)
+						X_px = (y_correction + Id_j) / 4.
+						Y_px = (x_correction + Id_i) / 4.
+
+						sig_z = self.z_range * np.std(psfs_Z[Id_i - self.radius_axi:Id_i + self.radius_axi + 1, 
+							Id_j - self.radius_axi:Id_j + self.radius_axi + 1])
+
+						entropy2d, entropy3d = self.calculate_entropy(sig_x, sig_y, sig_z)
+
+						sig_xyz = np.sqrt(sig_x ** 2 + sig_y ** 2 + sig_z ** 2)
+
+						z_weights = psfs_norm_unit[Id_i - self.radius_axi:Id_i + self.radius_axi + 1, Id_j - self.radius_axi:Id_j + self.radius_axi + 1]
+						z_dist    = psfs_Z[Id_i - self.radius_axi:Id_i + self.radius_axi + 1, Id_j - self.radius_axi:Id_j + self.radius_axi + 1]
+						# stop error of weights sum to zero can't e normalized
+						if z_weights.sum() == 0:
+							z_pi = 0
+						else:
+							z_pi = np.average(z_dist, weights=z_weights)
+						Z_nm = (z_pi * self.z_range) - (0.5000 * self.z_range)
+						if self.photon_head:
+							phot_modif = list(psfs_phot[Id_i - self.radius_phot:Id_i + self.radius_phot + 1,
+											  Id_j - self.radius_phot:Id_j + self.radius_phot + 1].flatten())
+							phot_modif.sort()
+							intensity = np.sum(phot_modif[-int(self.radius_phot ** 2):])
+						candidates.append({
+							'X_pr_px': X_px,
+							'Y_pr_px': Y_px,
+							'X_pr_nm': X_px * self.x_px_size,
+							'Y_pr_nm': Y_px * self.y_px_size,
+							'Z_pr_nm': Z_nm,
+							'Id_i': Id_i,
+							'Id_j': Id_j,
+							'prob': I_max,
+							'Freq_max': I_max,
+							'Freq_sum': I_sum,
+							'photons_pred': intensity,
+							'sig_x': sig_x,
+							'sig_y': sig_y,
+							'sig_z': sig_z,
+							'sig_xyz': sig_xyz,
+							'entropy2d': entropy2d,
+							'entropy3d': entropy3d})
+					# uncertainty and probability of prediciton should be added here
+			data_candids = pd.DataFrame(candidates)
+			data_candids = data_candids.dropna()
 			return data_candids
 		except Exception as e:
 			raise ValueError("Error in seed_candidate_3D: " + str(e))
 
 	def filter_candidates(self, dataset):
-		try:
-			threshold_freq_sum = self.param.post_processing.localization.threshold_freq_sum
-			threshold_freq_max = self.param.post_processing.localization.threshold_freq_max
-			threshold_photons = self.param.post_processing.localization.threshold_photons
-			if len(dataset) > 0:
-				dataset = dataset[dataset['photons_pred'] > threshold_photons]
-				dataset = dataset[(dataset['Freq_sum'] > threshold_freq_sum) | (dataset['prob'] > threshold_freq_max)]
-			return dataset
-		except Exception as e:
-			# Handle exceptions and provide an error message
-			raise ValueError("Error in filter_candidates: " + str(e))
+		raise DeprecationWarning("This function is deprecated. Use seed_candidates_3D instead.")
 
 	def localization_3D(self):
 		try:
-			# check psf format
-			psfs = self.psfs
-			if isinstance(psfs, list):
-				psfs = np.array(psfs)
-			if torch.is_tensor(psfs):
-				psfs = np.moveaxis(psfs.cpu().numpy(), 1, -1)
 			# check gt file and consider matching is true/false
 			GT = self.GT
 			loc_dataset = pd.DataFrame()  # Initialize an empty DataFrame to store results
 			if isinstance(GT, list) and not GT:
 				print("No gt file imported, then no matching will be applied.")
-				for f in range(psfs.shape[0]):
-					psf = psfs[f]
+				for f in range(self.psfs.shape[0]):
+					psf = self.psfs[f]
 					Pr_frame = self.seed_candidate_3D(psf)
-					Pr_frame = self.filter_candidates(Pr_frame)
 					if f == 0:
 						col_list = list(Pr_frame.keys())
 					Pr_frame['frame_id'] = f + 1
@@ -246,16 +250,15 @@ class localizer_machine:
 					Pr_frame = Pr_frame[['frame_id', 'seed_id'] + col_list]  # adjust order of columns
 					loc_dataset = pd.concat([loc_dataset, Pr_frame])  # Append the frame to all frames
 			else:
-				print("gt file imported, matching will be applied automatically.")
+				# print("gt file imported, matching will be applied automatically.")
 				GT[['frame_id', 'seed_id']] = GT[['frame_id', 'seed_id']].astype('int')  # assert it is integer
 				loc_dataset = pd.DataFrame()  # Initialize an empty DataFrame to store results
-				for f in range(psfs.shape[0]):
+				for f in range(self.psfs.shape[0]):
 					GtPr_frame = pd.DataFrame([])
-					psf = psfs[f]
+					psf = self.psfs[f]
 					frame_id = GT.frame_id.min() + f
 					GT_Frame = GT[GT.frame_id == frame_id]
 					PR_Frame = self.seed_candidate_3D(psf)
-					PR_Frame = self.filter_candidates(PR_Frame)
 					if GT_Frame.empty and PR_Frame.empty:
 						loc_dataset = pd.concat([loc_dataset, GtPr_frame])  # Append the frame to all frames
 						continue
@@ -295,8 +298,8 @@ class localizer_machine:
 				path = os.path.join(os.getcwd(), 'log')
 				if not os.path.exists(path):
 					os.mkdir(path)
-
-				saved_directory = os.path.join(path, generate_unique_filename(loc_dataset.frame_id.max()))
+				unique_name = generate_unique_filename(loc_dataset.frame_id.max(), prefix="localization_result", extension=".csv")
+				saved_directory = os.path.join(path, unique_name)
 				GtPr_frame.to_csv(saved_directory)
 				print()
 				print('localization is done. File has been saved in log directory')

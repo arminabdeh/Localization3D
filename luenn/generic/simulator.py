@@ -18,12 +18,20 @@ class fly_simulator:
 		self.z_range = self.param.Simulation.z_range
 		self.slide = self.param.Simulation.label_slide
 		self.box_size = self.param.Simulation.dist_sq_size
+		self.output_channels = self.param.architecture.output_channels
+		if self.output_channels == 2:
+			self.photon_head = False
+		elif self.output_channels == 3:
+			self.photon_head = True
+		else:
+			raise ValueError('output_channels must be 2 for xyz mode or 3 for xyz + photon mode')
+
 
 	def ds_train(self):
 		tar_em, sim_frames, bg_frames = self.sim_train.sample()
 		frame_max = bg_frames.numpy().shape[0]
 		tar_em = tar_em[tar_em.phot > self.param.HyperParameter.emitter_label_photon_min]
-		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide, self.box_size)
+		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide, self.box_size,photon_head=self.photon_head)
 		sim_frames = torch.transpose(sim_frames, 2, 1)
 		x_sim = torch.unsqueeze(sim_frames, 1)
 		x_sim = x_sim.cpu()
@@ -42,7 +50,7 @@ class fly_simulator:
 		tar_em, sim_frames, bg_frames = self.sim_test.sample()
 		frame_max = bg_frames.numpy().shape[0]
 		tar_em = tar_em[tar_em.phot > self.param.HyperParameter.emitter_label_photon_min]
-		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide, self.box_size)
+		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide, self.box_size,photon_head=self.photon_head)
 		sim_frames = torch.transpose(sim_frames, 2, 1)
 		x_sim = torch.unsqueeze(sim_frames, 1)
 		x_sim = x_sim.cpu()
@@ -60,7 +68,8 @@ class fly_simulator:
 
 
 class validation_simulator:
-	def __init__(self, param, report=False):
+	def __init__(self, param, report=False,with_label=False):
+		self.with_label = with_label
 		self.report = report
 		self.param = param
 		self.param.HyperParameter.pseudo_ds_size = 1
@@ -69,6 +78,15 @@ class validation_simulator:
 		sim_train, sim_test = setup_random_simulation(self.param)
 		self.simulator = sim_test
 		self.img_size = self.param.Simulation.img_size
+		if self.with_label:
+			self.scale_factor = self.param.Simulation.scale_factor
+			self.slide = self.param.Simulation.label_slide
+			self.box_size = self.param.Simulation.dist_sq_size
+			self.z_range = self.param.Simulation.z_range
+			if self.param.architecture.output_channels == 2:
+				self.photon_head = False
+			elif self.param.architecture.output_channels == 3:
+				self.photon_head = True
 
 	def sampling(self):
 		n_min = self.param.post_processing.simulation.n_min
@@ -85,8 +103,10 @@ class validation_simulator:
 		ns = list(np.random.randint(n_min, n_max + 1, size=self.n_frames))
 		items = list(np.arange(0, self.n_frames, dtype=np.int32))
 		frame_ix = torch.tensor([item for item, count in zip(items, ns) for _ in range(count)])
+		frame_ix = frame_ix.long()
 		prob = torch.tensor([1] * np.sum(ns)).float()
 		ids = torch.tensor(list(np.arange(0, np.sum(ns), dtype=np.int32)))
+		ids = ids.long()
 		xyz = []
 		phot = []
 		for f in range(0, self.n_frames):
@@ -105,8 +125,8 @@ class validation_simulator:
 			phot=phot,
 			frame_ix=frame_ix,
 			id=ids,
-			prob=prob,
 			xy_unit='px',
+			prob=prob,
 			px_size=(px_size[0], px_size[1]))
 		return tar_em
 
@@ -133,4 +153,53 @@ class validation_simulator:
 			print(f'total frames are {total_frames}')
 			print(f'Average seeds/frame is {total_seeds / total_frames}')
 			print()
-		return x_sim, gt
+		if self.with_label:
+			y_sim = label_generator(tar_em, total_frames,
+									self.scale_factor, self.z_range,
+									self.slide, self.box_size,photon_head=self.photon_head)
+		else:
+			y_sim = None
+
+		return x_sim,y_sim, gt
+if __name__ == '__main__':
+	from luenn.utils import param_reference,complex_real_map
+	from luenn.generic import label_generator
+	import matplotlib.pyplot as plt
+	param = param_reference()
+	x,y,gt = fly_simulator(param_reference(), report=True).ds_train()
+	intens = gt.photons.values
+	plt.hist(intens, bins=100)
+	plt.show()
+
+	x,y,gt = validation_simulator(param, report=True, with_label=True).sample()
+	print('Test validation data simulator based on the param_reference:')
+	print(f"validation set size is {x.shape[0]}")
+	if y is not None:
+		print(y.shape)
+	print('Ground truth:')
+	print(gt)
+	print(y.shape)
+	fig, ax = plt.subplots(2, 2, figsize=(15, 15))
+	ax[0][0].imshow(x.cpu()[0, 0, :, :])
+	ax[0][0].set_title('x_sim')
+	if y is not None:
+		ymap = complex_real_map(y.cpu())
+		ax[0][1].imshow(ymap[0, :, :])
+		ax[0][1].set_title('y_sim')
+	seed_loc = gt[(gt.frame_id == 1) & (gt.seed_id == 1)]
+	ym = int(seed_loc.X_tr_px.values[0])
+	ym2 = int(seed_loc.X_tr_px.values[0]*4+.5)
+	xm = int(seed_loc.Y_tr_px.values[0])
+	xm2 = int(seed_loc.Y_tr_px.values[0]*4+.5)
+	print(xm,ym,xm2,ym2)
+	xbox = 6
+	ybox = 3
+	ax[1][0].imshow(x.cpu()[0, 0, xm-xbox:xm+xbox+1, ym-xbox:ym+xbox+1])
+	ax[1][0].set_title('x_sim_zoom')
+	if y is not None:
+		ax[1][1].imshow(ymap[0, xm2-ybox:xm2+ybox+1, ym2-ybox:ym2+ybox+1])
+		ax[1][1].set_title('y_sim_zoom')
+		for i in range(ym2-ybox,ym2+ybox+1):
+			for j in range(xm2-ybox,xm2+ybox+1):
+				ax[1][1].text(i-(ym2-ybox)-.5,j-(xm2-ybox),str(np.round(ymap[0, j, i],1)))
+	plt.show()

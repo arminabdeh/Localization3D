@@ -16,6 +16,7 @@ from luenn.evaluate import reg_classification
 from luenn.generic import fly_simulator
 from luenn.localization import localizer_machine
 from luenn.model.model import UNet
+from luenn.utils import param_save
 
 
 class training_stream(Dataset):
@@ -33,8 +34,46 @@ class live_trainer:
     def __init__(self, param):
         self.param = param
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if param.InOut.model_in:
+        if self.param.architecture == 'default':
             self.model = UNet()
+        else:
+            initializer_str = self.param.architecture.initializer
+            initializer_str = initializer_str.lower()
+            if initializer_str == 'kaiming_uniform':
+                initializer = nn.init.kaiming_uniform_
+            elif initializer_str == 'xavier_uniform':
+                initializer = nn.init.xavier_uniform_
+            elif initializer_str == 'xavier_normal':
+                initializer = nn.init.xavier_normal_
+            elif initializer_str == 'kaiming_normal':
+                initializer = nn.init.kaiming_normal_
+            else:
+                raise ValueError('initializer not recognized, choose from kaiming_uniform, xavier_uniform, xavier_normal, kaiming_normal')
+
+            activation_str = self.param.architecture.activation
+            activation_str = activation_str.upper()
+            if activation_str == 'GELU':
+                activation = nn.GELU
+            elif activation_str == 'ELU':
+                activation = nn.ELU
+            elif activation_str == 'RELU':
+                activation = nn.ReLU
+            else:
+                raise ValueError('activation not recognized, choose from GELU, ELU, RELU')
+            input_channels = self.param.architecture.input_channels
+            pred_channels = self.param.architecture.pred_channels
+            kernel_unet = self.param.architecture.kernel_unet
+            kernel_HR = self.param.architecture.kernel_HR
+            kernel_output = self.param.architecture.kernel_output
+            output_channels = self.param.architecture.output_channels
+            self.model = UNet(initializer = initializer,
+				 activation=activation,
+				 pred_channels=pred_channels,
+				 input_channels = input_channels,
+				 kernel_unet=kernel_unet,
+				 kernel_HR=kernel_HR,
+				 kernel_output=kernel_output, output_channels=output_channels)
+        if param.InOut.model_in:
             self.model.to(self.device)
             loaded_model = torch.load(param.InOut.model_in)
             checkpoint = loaded_model['model_state_dict']
@@ -50,7 +89,6 @@ class live_trainer:
             print(f" best loss {loaded_model['best_loss']}")
             print(f"best loss happened at epoch {loaded_model['last_update_loss']}")
         else:
-            self.model = UNet()
             self.lr = param.HyperParameter.lr
             self.epoch_start = 0
             self.path = None
@@ -60,7 +98,6 @@ class live_trainer:
         self.metric_cur = 0
         self.batch_size = param.HyperParameter.batch_size
         self.num_epochs = param.HyperParameter.epochs
-
         self.gamma = param.HyperParameter.learning_rate_scheduler_param.gamma
         self.step_size = param.HyperParameter.learning_rate_scheduler_param.step_size
         self.restart_epochs = param.HyperParameter.restart_period
@@ -72,7 +109,7 @@ class live_trainer:
         self.criterion = nn.MSELoss()
         self.scheduler1 = lr_scheduler.StepLR(self.optimizer, self.step_size,gamma=self.gamma)
         self.scheduler2 = lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
-        if self.path is None:# checkpoint save path and best model save path and summary writer path
+        if self.path is None: # checkpoint save path and best model save path and summary writer path
             path = os.path.join(os.getcwd(), 'runs')
             if not os.path.exists(path):
                 os.mkdir(path)
@@ -85,7 +122,8 @@ class live_trainer:
         self.checkpoint_save_path = os.path.join(self.path, param.InOut.model_check)
         self.model_save_path = os.path.join(self.path, param.InOut.model_out)
         self.writer = SummaryWriter(self.path)
-
+        filename = os.path.join(self.path,'param_in.yaml')
+        param_save(param,filename)
     def train_one_epoch(self,dataloader_train):
         self.model.train()
         steps = len(dataloader_train)
@@ -98,12 +136,12 @@ class live_trainer:
             self.optimizer.zero_grad()
             outputs = self.model(inputs)
             loss = self.criterion(outputs, labels)
-            train_loss+=loss
+            train_loss+=loss.item()
             loss.backward()
             self.optimizer.step()
             tqdm_enum.update(1)
-            inputs = inputs.cpu()
-            labels = labels.cpu()
+            inputs.cpu()
+            labels.cpu()
             torch.cuda.empty_cache()
         return train_loss/len(dataloader_train)
 
@@ -139,8 +177,8 @@ class live_trainer:
                 loss = self.criterion(outputs, labels.cuda())
                 val_loss += loss.item()
                 tqdm_enum.update(1)
-                inputs = inputs.cpu()
-                labels = labels.cpu()
+                inputs.cpu()
+                labels.cpu()
                 torch.cuda.empty_cache()
                 if full_process:
                     temp_out = np.moveaxis(outputs.cpu().numpy(), 1, -1)
@@ -213,5 +251,7 @@ class live_trainer:
 
 
 if __name__ == '__main__':
-    trainer = LiveTrainer(param)
-    trainer.train()
+    from luenn.utils import param_reference
+    param = param_reference()
+    param.InOut.model_in = './runs/checkpoints_2023.12.04_15.56.25/checkpoint.pth'
+    live_trainer(param).train()
