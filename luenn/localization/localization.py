@@ -14,15 +14,13 @@ np.seterr(invalid='ignore')
 
 
 class localizer_machine:
-	def __init__(self, param, psfs, GT=None, save=None):
+	def __init__(self, param, psfs, GT=None, save=None, photon_head=False):
 		self.param = param
-		if self.param.architecture.output_channels == 2:
-			self.photon_head = False
-			self.threshold_photons = -1
-		else:
-			self.photon_head = True
+		self.photon_head = photon_head
+		if self.photon_head:
 			self.threshold_photons = self.param.post_processing.localization.threshold_photons
-
+		else:
+			self.threshold_photons = -1
 		if isinstance(psfs, list):
 			psfs = np.array(psfs)
 		if torch.is_tensor(psfs):

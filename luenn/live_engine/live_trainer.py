@@ -13,68 +13,33 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from luenn.evaluate import reg_classification
-from luenn.generic import fly_simulator
+from luenn.generic import modified_fly_simulator as fly_simulator
 from luenn.localization import localizer_machine
 from luenn.model.model import UNet
 from luenn.utils import param_save
 
-
 class training_stream(Dataset):
-    def __init__(self, param,simulator):
+    def __init__(self, simulator):
         self.data = simulator.ds_train()
         self.num_frames = self.data[0].numpy().shape[0]
     def __len__(self):
         return self.num_frames
-
     def __getitem__(self, index):
         x_sim, y_sim, gt_sim = self.data
-        return x_sim[index], y_sim[index]
+        x_sample = x_sim[index]
+        y_sample = y_sim[index]
+        return {'x': x_sample, 'y': y_sample}
+        # return x_sim[index], y_sim[index]
 
 class live_trainer:
     def __init__(self, param):
+        self.simulator = fly_simulator(param,report=True)
         self.param = param
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if self.param.architecture == 'default':
-            self.model = UNet()
-        else:
-            initializer_str = self.param.architecture.initializer
-            initializer_str = initializer_str.lower()
-            if initializer_str == 'kaiming_uniform':
-                initializer = nn.init.kaiming_uniform_
-            elif initializer_str == 'xavier_uniform':
-                initializer = nn.init.xavier_uniform_
-            elif initializer_str == 'xavier_normal':
-                initializer = nn.init.xavier_normal_
-            elif initializer_str == 'kaiming_normal':
-                initializer = nn.init.kaiming_normal_
-            else:
-                raise ValueError('initializer not recognized, choose from kaiming_uniform, xavier_uniform, xavier_normal, kaiming_normal')
-
-            activation_str = self.param.architecture.activation
-            activation_str = activation_str.upper()
-            if activation_str == 'GELU':
-                activation = nn.GELU
-            elif activation_str == 'ELU':
-                activation = nn.ELU
-            elif activation_str == 'RELU':
-                activation = nn.ReLU
-            else:
-                raise ValueError('activation not recognized, choose from GELU, ELU, RELU')
-            input_channels = self.param.architecture.input_channels
-            pred_channels = self.param.architecture.pred_channels
-            kernel_unet = self.param.architecture.kernel_unet
-            kernel_HR = self.param.architecture.kernel_HR
-            kernel_output = self.param.architecture.kernel_output
-            output_channels = self.param.architecture.output_channels
-            self.model = UNet(initializer = initializer,
-				 activation=activation,
-				 pred_channels=pred_channels,
-				 input_channels = input_channels,
-				 kernel_unet=kernel_unet,
-				 kernel_HR=kernel_HR,
-				 kernel_output=kernel_output, output_channels=output_channels)
+        self.model = UNet(param)
+        self.model.to(self.device)
+        self.num_workers = self.param.Hardware.num_worker_train
         if param.InOut.model_in:
-            self.model.to(self.device)
             loaded_model = torch.load(param.InOut.model_in)
             checkpoint = loaded_model['model_state_dict']
             self.model.load_state_dict(checkpoint)
@@ -105,7 +70,11 @@ class live_trainer:
         self.train_size = param.HyperParameter.pseudo_ds_size
         self.train_losses = []
         self.validation_losses = []
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        beta1 = param.HyperParameter.optimizer_param.beta1
+        beta2 = param.HyperParameter.optimizer_param.beta2
+        amsgrad = param.HyperParameter.optimizer_param.amsgrad
+        self.optimizer = getattr(torch.optim, "AdamW")(self.model.parameters(), lr=self.lr, betas=(beta1, beta2),
+													 eps=1e-08, weight_decay=0, amsgrad=amsgrad)
         self.criterion = nn.MSELoss()
         self.scheduler1 = lr_scheduler.StepLR(self.optimizer, self.step_size,gamma=self.gamma)
         self.scheduler2 = lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
@@ -124,24 +93,28 @@ class live_trainer:
         self.writer = SummaryWriter(self.path)
         filename = os.path.join(self.path,'param_in.yaml')
         param_save(param,filename)
-    def train_one_epoch(self,dataloader_train):
+    def train_one_epoch(self,dataloader_train,accumulation_steps=1):
         self.model.train()
         steps = len(dataloader_train)
-        tqdm_enum = tqdm(total=steps, smoothing=0.)
+        tqdm_enum = tqdm(total=int(steps/accumulation_steps)+1, smoothing=0.)
         train_loss = 0
-        for data in dataloader_train:
-            inputs, labels = data
-            inputs = inputs.cuda()
-            labels = labels.cuda()
-            self.optimizer.zero_grad()
+        for batch_idx, data in enumerate(dataloader_train):
+            inputs, labels = data['x'],data['y']
+            inputs = inputs.to(self.device)
+            labels = labels.to(self.device)
             outputs = self.model(inputs)
             loss = self.criterion(outputs, labels)
             train_loss+=loss.item()
+            loss = loss/accumulation_steps
             loss.backward()
-            self.optimizer.step()
-            tqdm_enum.update(1)
-            inputs.cpu()
-            labels.cpu()
+
+            if (batch_idx+1)%accumulation_steps==0 or batch_idx==len(dataloader_train)-1:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                tqdm_enum.update(1)
+                # tqdm_enum.close()
+            inputs.to('cpu')
+            labels.to('cpu')
             torch.cuda.empty_cache()
         return train_loss/len(dataloader_train)
 
@@ -190,20 +163,24 @@ class live_trainer:
         return val_loss,pr_gt
 
     def train(self):
-        simulator = fly_simulator(self.param,report=True)
-        x_test, y_test, gt_test = simulator.ds_test()
+        #initialize train and test datasets
+        #test data
+        x_test, y_test, gt_test = self.simulator.ds_test()
         dataset_test = torch.utils.data.TensorDataset(x_test, y_test)
-        dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, shuffle=False,pin_memory=True)
-
+        dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=self.num_workers)
         #training data
-        streaming_dataset = training_stream(self.param, simulator)
-        dataloader_train = DataLoader(streaming_dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True)
+        streaming_dataset = training_stream(self.simulator)
+        dataloader_train = DataLoader(streaming_dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True, num_workers=self.num_workers)
+        accumulation_steps = 128//self.batch_size
         for epoch in range(self.epoch_start, self.num_epochs):
             if epoch%self.restart_epochs==0 and epoch!=0:
                 print('restart simulation setup')
-                streaming_dataset = training_stream(self.param, simulator)
-                dataloader_train = DataLoader(streaming_dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True)
-            loss_train = self.train_one_epoch(dataloader_train)
+                x_test, y_test, gt_test = self.simulator.ds_test()
+                dataset_test = torch.utils.data.TensorDataset(x_test, y_test)
+                dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=self.num_workers)
+                streaming_dataset = training_stream(self.simulator)
+                dataloader_train = DataLoader(streaming_dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True, num_workers=self.num_workers)
+            loss_train = self.train_one_epoch(dataloader_train,accumulation_steps=accumulation_steps)
             if epoch%self.val_localization_period==0 and epoch!=0:
                 loss_val,pr_gt   = self.validate(dataloader_test,gt_test,full_process=True)
                 ji     = reg_classification(pr_gt).jaccardian_index()
@@ -253,5 +230,4 @@ class live_trainer:
 if __name__ == '__main__':
     from luenn.utils import param_reference
     param = param_reference()
-    param.InOut.model_in = './runs/checkpoints_2023.12.04_15.56.25/checkpoint.pth'
     live_trainer(param).train()

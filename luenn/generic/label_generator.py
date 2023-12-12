@@ -12,7 +12,7 @@ def label_dist(xm, ym, box_size):
 	return gaussian_unit, gaussian_norm
 
 
-def label_generator(tar_em, frame_max, scale_factor, z_range, slide, box_size,photon_head=True):
+def label_generator(tar_em, frame_max, scale_factor, z_range, slide, box_size,photon_head=False):
 	frame_ids = tar_em.frame_ix.numpy()  # start from 0 to F: total F+1
 	frame_ids = list(np.unique(frame_ids))
 	if photon_head:
