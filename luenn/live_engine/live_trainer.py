@@ -91,6 +91,7 @@ class live_trainer:
         self.checkpoint_save_path = os.path.join(self.path, param.InOut.model_check)
         self.model_save_path = os.path.join(self.path, param.InOut.model_out)
         self.writer = SummaryWriter(self.path)
+        self.writer.add_graph(self.model, torch.zeros(1, 1, 64, 64).to(self.device))
         filename = os.path.join(self.path,'param_in.yaml')
         param_save(param,filename)
     def train_one_epoch(self,dataloader_train,accumulation_steps=1):
@@ -171,7 +172,7 @@ class live_trainer:
         #training data
         streaming_dataset = training_stream(self.simulator)
         dataloader_train = DataLoader(streaming_dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True, num_workers=self.num_workers)
-        accumulation_steps = 128//self.batch_size
+        accumulation_steps = 32//self.batch_size
         for epoch in range(self.epoch_start, self.num_epochs):
             if epoch%self.restart_epochs==0 and epoch!=0:
                 print('restart simulation setup')
@@ -219,13 +220,12 @@ class live_trainer:
             self.writer.add_scalar('Loss/train', loss_train, epoch)
             self.writer.add_scalar('Loss/validation', loss_val, epoch)
             self.writer.add_scalar('Metrics/lr', self.scheduler1.get_last_lr()[0], epoch)
+
             print()
             print(f'Epoch [{epoch+1}/{self.num_epochs}] - ' f'Train Loss: {loss_train:.4f} --------- ' f'Validation Loss: {loss_val:.4f}')
             print()
             self.metric_cur = loss_val
             self.save_checkpoint(epoch)
-
-
 
 if __name__ == '__main__':
     from luenn.utils import param_reference
