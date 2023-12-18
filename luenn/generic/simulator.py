@@ -71,21 +71,16 @@ class modified_fly_simulator:
 		self.param = param
 		self.train_size = param.HyperParameter.pseudo_ds_size
 		self.test_size = param.TestSet.test_size
-		self.param.HyperParameter.pseudo_ds_size = 1
-		self.param.TestSet.test_size = 1
 		sim_train, sim_test = setup_random_simulation(self.param)
 		self.simulator = sim_train
 		self.scale_factor = self.param.Simulation.scale_factor
 		self.z_range = self.param.Simulation.z_range
 		self.slide = self.param.Simulation.label_slide
 		self.box_size = self.param.Simulation.dist_sq_size
-		if self.param.architecture and self.param.architecture != 'default':
-			if self.param.architecture.output_channels == 3:
-				self.photon_head = True
-			else:
-				self.photon_head = False
-		else:
-			self.photon_head = False
+		self.photon_head = False
+		if param.HyperParameter.output_channels == 3:
+			self.photon_head = True
+
 	def sampling(self,train_set=True):
 		if train_set:
 			n_frames = self.train_size

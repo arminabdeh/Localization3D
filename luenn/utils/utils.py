@@ -1,12 +1,31 @@
+import os
+from argparse import Namespace
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import torch
-from luenn.model.model import UNet
-from argparse import Namespace
 import yaml
-import os
-import torch.nn as nn
-from datetime import datetime
+from luenn.model.model import UNet
+
+def auto_scaling(param):
+    bg_uniform = param.Simulation.intensity_mu_sig[0]/100.
+    bg_max = bg_uniform * 1.2
+    input_offset = bg_uniform
+    input_scale = param.Simulation.intensity_mu_sig[0]/50.
+    phot_max = param.Simulation.intensity_mu_sig[0] +(param.Simulation.intensity_mu_sig[1]*8)
+    z_max = param.Simulation.emitter_extent[2][1]*1.2
+    emitter_label_photon_min = param.Simulation.intensity_mu_sig[0]/20.
+    param.Simulation.bg_uniform = bg_uniform
+    param.Scaling.bg_max = bg_max
+    param.Scaling.input_offset = input_offset
+    param.Scaling.input_scale = input_scale
+    param.Scaling.phot_max = phot_max
+    param.Scaling.z_max = z_max
+    param.HyperParameter.emitter_label_photon_min = emitter_label_photon_min
+    param.post_processing.simulation.Imean = param.Simulation.intensity_mu_sig[0]
+    param.post_processing.simulation.Isig = param.Simulation.intensity_mu_sig[1]
+    return param
+
 def convert_to_recursive_namespace(dictionary):
     for key, value in dictionary.items():
         if isinstance(value, dict):
@@ -32,47 +51,13 @@ def generate_unique_filename(f, prefix="", extension=""):
     unique_filename = f"{prefix}_{timestamp}_{str(f)}xframe{extension}"
     return unique_filename
 
-def load_model(dir_model,param=None):
+def load_model(dir_model):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if param:
-        initializer_str = param.architecture.initializer
-        initializer_str = initializer_str.lower()
-        if initializer_str == 'kaiming_uniform':
-            initializer = nn.init.kaiming_uniform_
-        elif initializer_str == 'xavier_uniform':
-            initializer = nn.init.xavier_uniform_
-        elif initializer_str == 'xavier_normal':
-            initializer = nn.init.xavier_normal_
-        elif initializer_str == 'kaiming_normal':
-            initializer = nn.init.kaiming_normal_
-        else:
-            raise ValueError('initializer not recognized, choose from kaiming_uniform, xavier_uniform, xavier_normal, kaiming_normal')
-        activation_str = param.architecture.activation
-        activation_str = activation_str.upper()
-        if activation_str == 'GELU':
-            activation = nn.GELU
-        elif activation_str == 'ELU':
-            activation = nn.ELU
-        elif activation_str == 'RELU':
-            activation = nn.ReLU
-        else:
-            raise ValueError('activation not recognized, choose from GELU, ELU, RELU')
-
-        pred_channels = param.architecture.pred_channels
-        kernel_unet = param.architecture.kernel_unet
-        kernel_HR = param.architecture.kernel_HR
-        kernel_output = param.architecture.kernel_output
-        input_channels = param.architecture.input_channels
-        model = UNet(initializer=initializer, activation=activation, input_channels=input_channels,
-                     pred_channels=pred_channels, kernel_unet=kernel_unet, kernel_HR=kernel_HR,
-                     kernel_output=kernel_output)
-    else:
-        model = UNet()
+    model = UNet()
     model.to(device)
     loaded_model = torch.load(dir_model)
     if isinstance(loaded_model, dict):
-        print(
-            f"It's a state_dict saved at epoch {loaded_model['epoch']} with lr {loaded_model['lr_scheduler_state_dict']}")
+        print(f"It's a state_dict saved at epoch {loaded_model['epoch']} with lr {loaded_model['lr_scheduler_state_dict']}")
         checkpoint = loaded_model['model_state_dict']
     else:
         checkpoint = loaded_model.state_dict()

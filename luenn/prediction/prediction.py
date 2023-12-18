@@ -7,7 +7,7 @@ from tqdm import tqdm
 def analyse(model, x_sim, param):
 	batch_size = param.HyperParameter.batch_size
 	dataset_test = torch.utils.data.TensorDataset(x_sim)
-	dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, pin_memory=True)
+	dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=0)
 	model.eval()
 	steps = len(dataloader_test)
 	tqdm_enum = tqdm(total=steps, smoothing=0.)
