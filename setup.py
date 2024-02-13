@@ -24,9 +24,8 @@ from setuptools import setup
 requirements = []
 setup(
     name='luenn',
-    version='0.10.2',
+    version='0.10.02',
     packages=setuptools.find_packages(),
-    package_data={'luenn': ['config/**/*']},
     include_package_data=True,
     install_requires=requirements,
     zip_safe=False,

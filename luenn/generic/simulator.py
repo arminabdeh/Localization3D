@@ -6,6 +6,7 @@ from luenn.generic import label_generator
 from luenn.utils.utils import dec_luenn_gt_transform
 import pandas as pd
 
+
 class fly_simulator:
 	def __init__(self, param, report=False):
 		self.report = report
@@ -17,20 +18,14 @@ class fly_simulator:
 		self.z_range = self.param.Simulation.z_range
 		self.slide = self.param.Simulation.label_slide
 		self.box_size = self.param.Simulation.dist_sq_size
-		if self.param.architecture and self.param.architecture != 'default':
-			if self.param.architecture.output_channels == 3:
-				self.photon_head = True
-			else:
-				self.photon_head = False
-		else:
-			self.photon_head = False
+
 	def ds_train(self):
 		tar_em, sim_frames, bg_frames = self.sim_train.sample()
 		frame_max = bg_frames.numpy().shape[0]
 		tar_em = tar_em[tar_em.phot > self.param.HyperParameter.emitter_label_photon_min]
 		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide,
 								self.box_size,
-								photon_head=self.photon_head)
+								)
 		sim_frames = torch.transpose(sim_frames, 2, 1)
 		x_sim = torch.unsqueeze(sim_frames, 1)
 		x_sim = x_sim.cpu()
@@ -44,12 +39,13 @@ class fly_simulator:
 			print(f'Average seeds/frame is {total_seeds / total_frames}')
 			print()
 		return x_sim, y_sim, gt
+
 	def ds_test(self):
 		tar_em, sim_frames, bg_frames = self.sim_test.sample()
 		frame_max = bg_frames.numpy().shape[0]
 		tar_em = tar_em[tar_em.phot > self.param.HyperParameter.emitter_label_photon_min]
 		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide,
-								self.box_size, photon_head=self.photon_head)
+								self.box_size)
 		sim_frames = torch.transpose(sim_frames, 2, 1)
 		x_sim = torch.unsqueeze(sim_frames, 1)
 		x_sim = x_sim.cpu()
@@ -65,6 +61,7 @@ class fly_simulator:
 			print()
 		return x_sim, y_sim, gt
 
+
 class modified_fly_simulator:
 	def __init__(self, param, report=False):
 		self.report = report
@@ -77,20 +74,22 @@ class modified_fly_simulator:
 		self.z_range = self.param.Simulation.z_range
 		self.slide = self.param.Simulation.label_slide
 		self.box_size = self.param.Simulation.dist_sq_size
-		self.photon_head = False
-		if param.HyperParameter.output_channels == 3:
-			self.photon_head = True
 
-	def sampling(self,train_set=True):
+	def sampling(self, train_set=True):
 		if train_set:
 			n_frames = self.train_size
 		else:
 			n_frames = self.test_size
 		n_mean = self.param.Simulation.emitter_av
-		n_std  = n_mean/2
-		n_min = max(1,int(n_mean-2*n_std))
-		n_max = int(n_mean+2*n_std)
-		ns = list(np.random.randint(n_min,n_max,n_frames))
+		n_std = n_mean / 4
+		ns = np.random.normal(n_mean, n_std, n_frames)
+		ns = np.round(ns).astype(int)
+		ns = list(np.clip(ns, 1, 100))
+		# print(ns)
+		# ns = list(np.random.randint(max(1,int(n_mean-2*n_std)),int(n_mean+2*n_std),n_frames))
+		# n_min = max(1,int(n_mean-2*n_std))
+		# n_max = int(n_mean+2*n_std)
+		# ns = list(np.random.randint(n_min,n_max,n_frames))
 		Imean = self.param.Simulation.intensity_mu_sig[0]
 		Isig = self.param.Simulation.intensity_mu_sig[1]
 		x_min = self.param.Simulation.emitter_extent[0][0]
@@ -128,8 +127,9 @@ class modified_fly_simulator:
 			prob=prob,
 			px_size=(px_size[0], px_size[1]))
 		return tar_em
-	def generate_engine(self,tar_em,mode='train'):
-		f_max = tar_em.frame_ix.max()+1
+
+	def generate_engine(self, tar_em, mode='train'):
+		f_max = tar_em.frame_ix.max() + 1
 		x_sim = np.zeros((f_max, 1, int(self.param.Simulation.img_size[0]), int(self.param.Simulation.img_size[1])))
 		for f in range(0, f_max):
 			em_frame = tar_em[tar_em.frame_ix == f]
@@ -148,28 +148,31 @@ class modified_fly_simulator:
 			print(f'total seeds are {total_seeds}')
 			print(f'total frames are {f_max}')
 			print(f'Average seeds/frame is {total_seeds / f_max}')
-			#number of unique seeds
+			# number of unique seeds
 			gt_filter = gt.drop_duplicates(subset=['X_tr_px', 'Y_tr_px'])
 			n_unique_seeds = len(gt_filter)
 			average_photons = np.mean(gt.photons.values)
 			print(f'Number of unique seeds is {n_unique_seeds}')
 			print(f'Average photons per set {average_photons}')
-			print('-'*50)
+			print('-' * 50)
 		y_sim = label_generator(tar_em, f_max,
 								self.scale_factor, self.z_range,
-								self.slide, self.box_size,photon_head=self.photon_head)
-		return x_sim,y_sim, gt
+								self.slide, self.box_size)
+		return x_sim, y_sim, gt
+
 	def ds_train(self):
 		tar_em = self.sampling(train_set=True)
-		x,y,gt = self.generate_engine(tar_em,mode='train')
-		return x,y,gt
+		x, y, gt = self.generate_engine(tar_em, mode='train')
+		return x, y, gt
+
 	def ds_test(self):
 		tar_em = self.sampling(train_set=False)
-		x,y,gt = self.generate_engine(tar_em,mode='test')
-		return x,y,gt
+		x, y, gt = self.generate_engine(tar_em, mode='test')
+		return x, y, gt
+
 
 class validation_simulator:
-	def __init__(self, param, report=False,with_label=False):
+	def __init__(self, param, report=False, with_label=False):
 		self.with_label = with_label
 		self.report = report
 		self.param = param
@@ -184,13 +187,6 @@ class validation_simulator:
 			self.slide = self.param.Simulation.label_slide
 			self.box_size = self.param.Simulation.dist_sq_size
 			self.z_range = self.param.Simulation.z_range
-			if self.param.architecture and self.param.architecture != 'default':
-				if self.param.architecture.output_channels == 3:
-					self.photon_head = True
-				else:
-					self.photon_head = False
-			else:
-				self.photon_head = False
 
 	def sampling(self):
 		n_min = self.param.post_processing.simulation.n_min
@@ -260,21 +256,24 @@ class validation_simulator:
 		if self.with_label:
 			y_sim = label_generator(tar_em, total_frames,
 									self.scale_factor, self.z_range,
-									self.slide, self.box_size,photon_head=self.photon_head)
+									self.slide, self.box_size)
 		else:
 			y_sim = None
 
-		return x_sim,y_sim, gt
+		return x_sim, y_sim, gt
+
+
 if __name__ == '__main__':
-	from luenn.utils import param_reference,complex_real_map
+	from luenn.utils import param_reference, complex_real_map
 	import matplotlib.pyplot as plt
+
 	param = param_reference()
-	x,y,gt = fly_simulator(param_reference(), report=True).ds_train()
+	x, y, gt = fly_simulator(param_reference(), report=True).ds_train()
 	intens = gt.photons.values
 	plt.hist(intens, bins=100)
 	plt.show()
 
-	x,y,gt = validation_simulator(param, report=True, with_label=True).sample()
+	x, y, gt = validation_simulator(param, report=True, with_label=True).sample()
 	print('Test validation data simulator based on the param_reference:')
 	print(f"validation set size is {x.shape[0]}")
 	if y is not None:
@@ -291,18 +290,18 @@ if __name__ == '__main__':
 		ax[0][1].set_title('y_sim')
 	seed_loc = gt[(gt.frame_id == 1) & (gt.seed_id == 1)]
 	ym = int(seed_loc.X_tr_px.values[0])
-	ym2 = int(seed_loc.X_tr_px.values[0]*4+.5)
+	ym2 = int(seed_loc.X_tr_px.values[0] * 4 + .5)
 	xm = int(seed_loc.Y_tr_px.values[0])
-	xm2 = int(seed_loc.Y_tr_px.values[0]*4+.5)
-	print(xm,ym,xm2,ym2)
+	xm2 = int(seed_loc.Y_tr_px.values[0] * 4 + .5)
+	print(xm, ym, xm2, ym2)
 	xbox = 6
 	ybox = 3
-	ax[1][0].imshow(x.cpu()[0, 0, xm-xbox:xm+xbox+1, ym-xbox:ym+xbox+1])
+	ax[1][0].imshow(x.cpu()[0, 0, xm - xbox:xm + xbox + 1, ym - xbox:ym + xbox + 1])
 	ax[1][0].set_title('x_sim_zoom')
 	if y is not None:
-		ax[1][1].imshow(ymap[0, xm2-ybox:xm2+ybox+1, ym2-ybox:ym2+ybox+1])
+		ax[1][1].imshow(ymap[0, xm2 - ybox:xm2 + ybox + 1, ym2 - ybox:ym2 + ybox + 1])
 		ax[1][1].set_title('y_sim_zoom')
-		for i in range(ym2-ybox,ym2+ybox+1):
-			for j in range(xm2-ybox,xm2+ybox+1):
-				ax[1][1].text(i-(ym2-ybox)-.5,j-(xm2-ybox),str(np.round(ymap[0, j, i],1)))
+		for i in range(ym2 - ybox, ym2 + ybox + 1):
+			for j in range(xm2 - ybox, xm2 + ybox + 1):
+				ax[1][1].text(i - (ym2 - ybox) - .5, j - (xm2 - ybox), str(np.round(ymap[0, j, i], 1)))
 	plt.show()

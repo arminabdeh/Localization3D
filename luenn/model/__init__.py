@@ -1,1 +1,1 @@
-from luenn.model.model import UNet
+from luenn.model.model import UNet, SmallCNNWithUncertainty

@@ -9,9 +9,9 @@ class reg_classification:
 			self.TP = 0
 			self.FP = 0
 			self.FN = 0
-			self.xe = np.array([np.inf])
-			self.ye = np.array([np.inf])
-			self.ze = np.array([np.inf])
+			self.xe = 0
+			self.ye = 0
+			self.ze = 0
 		else:
 			self.TP = len(res_loc[res_loc.label == 'TP'])
 			self.FP = len(res_loc[res_loc.label == 'FP'])

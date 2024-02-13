@@ -1,180 +1,156 @@
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 from torchsummary import summary
 import torch.nn.functional as F
-class parallel_conv(nn.Module):
-	def __init__(self,input_channels=1):
+import torch.distributions as dist
+
+
+class ParallelConv(nn.Module):
+	def __init__(self, in_channels=1):
 		super().__init__()
-		self.conv1 = nn.Conv2d(input_channels, 64, kernel_size=3, stride=1, padding=1)
-		self.conv2 = nn.Conv2d(input_channels, 64, kernel_size=5, stride=1, padding=2)
-		self.conv3 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=1, padding=3)
+		self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1)
+		self.conv2 = nn.Conv2d(in_channels, 32, kernel_size=5, stride=1, padding=2)
+		self.conv3 = nn.Conv2d(in_channels, 32, kernel_size=7, stride=1, padding=3)
+
 	def forward(self, x):
-		x1 = F.elu(self.conv1(x))
-		x2 = F.elu(self.conv2(x))
-		x3 = F.elu(self.conv3(x))
-		x = torch.cat((x1, x2, x3), dim=1)
-		return x
+		return F.elu(torch.cat((self.conv1(x), self.conv2(x), self.conv3(x)), dim=1))
 
 
 class UNet(nn.Module):
-	def __init__(self):
+	def __init__(self, batch_norm=True):
 		super(UNet, self).__init__()
-		self.initializer = nn.init.xavier_uniform_
 		self.activation = nn.ELU
-		self.input = parallel_conv()
+		self.input = ParallelConv()
+
+		def conv_block(in_channels, out_channels):
+			return nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1), nn.BatchNorm2d(out_channels), self.activation())
+
 		self.enc = nn.ModuleList([
-			nn.Conv2d(64*3, 64, kernel_size=3, stride=1, padding=1), # 1x64x64 -> 64x64x64 layer_id 0
-			self.activation(),  # layer_id 1
-			nn.BatchNorm2d(64),  # layer_id 2
-			nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1), # 64x64x64 -> 64x64x64 layer_id 3
-			self.activation(),  # layer_id 4
-			nn.BatchNorm2d(64),  # layer_id 5 --> skip connection
-			nn.MaxPool2d(kernel_size=2, stride=2),  # 64-->32 layer_id 6
-			nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1), # 64x32x32 -> 128x32x32 layer_id 7
-			self.activation(),  # layer_id 8
-			nn.BatchNorm2d(128),  # layer_id 9
-			nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1), # 128x32x32 -> 128x32x32 layer_id 10
-			self.activation(),  # layer_id 11
-			nn.BatchNorm2d(128),  # layer_id 12 --> skip connection
-			nn.MaxPool2d(kernel_size=2, stride=2),  # 32-->16 layer_id 13
-			nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1), # 128x16x16 -> 256x16x16 layer_id 14
-			self.activation(),  # layer_id 15
-			nn.BatchNorm2d(256),  # layer_id 16
-			nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1), # 256x16x16 -> 256x16x16 layer_id 17
-			self.activation(),  # layer_id 18
-			nn.BatchNorm2d(256),  # layer_id 19
-			nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1), # 256x16x16 -> 256x16x16 layer_id 20
-			self.activation(),  # layer_id 21
-			nn.BatchNorm2d(256),  # layer_id 22
-			nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1), # 256x16x16 -> 256x16x16 layer_id 23
-			self.activation(),  # layer_id 24
-			nn.BatchNorm2d(256),  # layer_id 25 --> skip connection
-			nn.MaxPool2d(kernel_size=2, stride=2),  # 16-->8 layer_id 26
-			nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 512x8x8 -> 512x8x8 layer_id 27
-			self.activation(),  # layer_id 28
-			nn.BatchNorm2d(512),  # layer_id 29
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1), # 512x8x8 -> 512x8x8 layer_id 30
-			self.activation(),  # layer_id 31
-			nn.BatchNorm2d(512),  # layer_id 32
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),# 512x8x8 -> 512x8x8 layer_id 33
-			self.activation(),  # layer_id 34
-			nn.BatchNorm2d(512),  # layer_id 35
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),# 512x8x8 -> 512x8x8 layer_id 36
-			self.activation(),  # layer_id 37
-			nn.BatchNorm2d(512),  # layer_id 38 --> skip connection
-			nn.MaxPool2d(kernel_size=2, stride=2), # 8-->4 layer_id 39
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1), # 512x4x4 -> 512x4x4 layer_id 40
-			self.activation(),  # layer_id 41
-			nn.BatchNorm2d(512),  # layer_id 42
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1), # 512x4x4 -> 512x4x4 layer_id 43
-			self.activation(),  # layer_id 44
-			nn.BatchNorm2d(512),  # layer_id 45
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1), # 512x4x4 -> 512x4x4 layer_id 46
-			self.activation(),  # layer_id 47
-			nn.BatchNorm2d(512),  # layer_id 48
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1), # 512x4x4 -> 512x4x4 layer_id 49
-			self.activation(),  # layer_id 50
-			nn.BatchNorm2d(512)]) # layer_id 51
-
-
+			conv_block(128, 64),  # 0
+			conv_block(64, 64),  # 1
+			nn.MaxPool2d(2, 2),  # 2
+			conv_block(64, 128),  # 3
+			conv_block(128, 128),  # 4
+			nn.MaxPool2d(2, 2),  # 5
+			conv_block(128, 256),  # 6
+			conv_block(256, 256),  # 7
+			conv_block(256, 256),  # 8
+			conv_block(256, 256),  # 9
+			nn.MaxPool2d(2, 2),  # 10
+			conv_block(256, 512),  # 11
+			conv_block(512, 512),  # 12
+			conv_block(512, 512),  # 13
+			conv_block(512, 512),  # 14
+			nn.MaxPool2d(2, 2),  # 15
+			conv_block(512, 512),  # 16
+			conv_block(512, 512),  # 17
+			conv_block(512, 512),  # 18
+			conv_block(512, 512)  # 19
+		])
 		self.decoder = nn.ModuleList([
-			nn.UpsamplingBilinear2d(scale_factor=2),  # 4-->8 layer_id 0
-			nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),	# 512x8x8 -> 512x8x8 layer_id 1
-			self.activation(),  # layer_id 2
-			nn.BatchNorm2d(512),  # layer_id 3 --> skip connection to layer_id 38
-			nn.Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),	# 1024x8x8 -> 512x8x8 layer_id 4
-			self.activation(),  # layer_id 5
-			nn.BatchNorm2d(512),  # layer_id 6
-			nn.UpsamplingBilinear2d(scale_factor=2),  # 8-->16 layer_id 7
-			nn.Conv2d(512, 256, kernel_size=3, stride=1, padding=1),	# 512x16x16 -> 256x16x16 layer_id 8
-			self.activation(),  # layer_id 9
-			nn.BatchNorm2d(256),  # layer_id 10 --> skip connection to layer_id 25
-			nn.Conv2d(512, 256, kernel_size=3, stride=1, padding=1), # 512x16x16 -> 256x16x16 layer_id 11
-			self.activation(),  # layer_id 12
-			nn.BatchNorm2d(256),  # layer_id 13
-			nn.UpsamplingBilinear2d(scale_factor=2),  # 16-->32 layer_id 14
-			nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1), # 256x32x32 -> 128x32x32 layer_id 15
-			self.activation(),  # layer_id 16
-			nn.BatchNorm2d(128),  # layer_id 17 --> skip connection to layer_id 12
-			nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1), # 256x32x32 -> 128x32x32 layer_id 18
-			self.activation(),  # layer_id 19
-			nn.BatchNorm2d(128),  # layer_id 20
-			nn.UpsamplingBilinear2d(scale_factor=2),  # 32-->64 layer_id 21
-			nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1), # 128x64x64 -> 64x64x64 layer_id 22
-			self.activation(),  # layer_id 23
-			nn.BatchNorm2d(64),  # layer_id 24 --> skip connection to layer_id 5
-			nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),  # 128x64x64 -> 64x64x64 layer_id 25
-			self.activation(),  # layer_id 26
-			nn.BatchNorm2d(64),  # layer_id 27
-			nn.UpsamplingBilinear2d(scale_factor=2),  # 64-->128 layer_id 28
-			nn.Conv2d(64, 64, kernel_size=7, stride=1, padding=3),  # 64x128x128 -> 64128x128 layer_id 29
-			self.activation(),  # layer_id 30
-			nn.BatchNorm2d(64),  # layer_id 31
-			nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2),  # 64x128x128 -> 64x128x128 layer_id 32
-			self.activation(),  # layer_id 33
-			nn.BatchNorm2d(64),  # layer_id 34 --> recurrent connection to layer_id 31
-			nn.Conv2d(64 * 2, 64, kernel_size=3, stride=1, padding=1),  # 64x128x128 -> 64x128x128 layer_id 35
-			self.activation(),  # layer_id 36
-			nn.BatchNorm2d(64),  # layer_id 37 --> recurrent connection to layer_id 31 and 34
-			nn.Conv2d(64 * 3, 64, kernel_size=3, stride=1, padding=1),  # 64x128x128 -> 64x128x128 layer_id 38
-			self.activation(),  # layer_id 39
-			nn.BatchNorm2d(64),  # layer_id 40
-			nn.UpsamplingBilinear2d(scale_factor=2),  # 128-->256 layer_id 41
-			nn.Conv2d(64, 64, kernel_size=7, stride=1, padding=3),  # 64x256x256 -> 64x256x256 layer_id 42
-			self.activation(),  # layer_id 43
-			nn.BatchNorm2d(64),  # layer_id 44
-			nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2),  # 64x256x256 -> 64x256x256 layer_id 45
-			self.activation(),  # layer_id 46
-			nn.BatchNorm2d(64),  # layer_id 47 --> recurrent connection to layer_id 44
-			nn.Conv2d(64 * 2, 64, kernel_size=3, stride=1, padding=1),  # 64x256x256 -> 64x256x256 layer_id 48
-			self.activation(),  # layer_id 49
-			nn.BatchNorm2d(64),  # layer_id 50 --> recurrent connection to layer_id 44 and 47
-			nn.Conv2d(64 * 3, 256, kernel_size=3, stride=1, padding=1),  # 64x256x256 -> 64x256x256 layer_id 51
-			self.activation(),  # layer_id 52
-			nn.Conv2d(256, 2, kernel_size=5, stride=1,  padding=2)])  # output layer_id 53
-		# initializer to initialize the weights of the model
-		for layer in self.enc:
-			if isinstance(layer, nn.Conv2d):
-				self.initializer(layer.weight.data)
-		for layer in self.decoder:
-			if isinstance(layer, nn.Conv2d):
-				self.initializer(layer.weight.data)
+			nn.UpsamplingBilinear2d(scale_factor=2),  # 0
+			conv_block(512+512, 512),  # 1
+			conv_block(512, 512),  # 2
+			nn.UpsamplingBilinear2d(scale_factor=2),  # 3
+			conv_block(512+256, 256),  # 4
+			conv_block(256, 256),  # 5
+			nn.UpsamplingBilinear2d(scale_factor=2),  # 6
+			conv_block(256+128, 128),  # 7
+			conv_block(128, 128),  # 8
+			nn.UpsamplingBilinear2d(scale_factor=2),  # 9
+			conv_block(128+64, 64),  # 10
+			conv_block(64, 64),  # 11
+			nn.UpsamplingBilinear2d(scale_factor=2),  # 12
+			conv_block(64, 64),  # 13
+			conv_block(64, 64),  # 14
+			conv_block(64 * 2, 64),  # 15
+			conv_block(64 * 3, 64),  # 16
+			nn.UpsamplingBilinear2d(scale_factor=2),  # 17
+			conv_block(64, 64),  # 18
+			conv_block(64, 64),  # 19
+			conv_block(64 * 2, 64),  # 20
+			conv_block(64 * 3, 256),  # 21
+			conv_block(256, 128),  # 22
+			conv_block(128, 64),  # 23
+		])
+		self.out_mean = nn.Conv2d(64, 2, kernel_size=5, stride=1, padding=2)
+		self.out_std  = nn.Conv2d(64, 2, kernel_size=5, stride=1, padding=2)
 
 	def forward(self, x):
 		x = self.input(x)
 		enc_skip = []
 		for i, layer in enumerate(self.enc.children()):
 			x = layer(x)
-			if i in {5, 12, 25, 38}:
+			if i in {1, 4, 9, 14}:
 				enc_skip.append(x)
 		for i, layer in enumerate(self.decoder.children()):
 			x = layer(x)
-			if i in {3,10,17,24}:
+			if i in {0, 3, 6, 9}:
 				x = torch.cat((x, enc_skip.pop()), dim=1)
-
-			rec_layers1 = [34, 37]
-			if i==31:
-				x_rec = x
-			if i in rec_layers1:
-				x = torch.cat((x, x_rec), dim=1)
-				x_rec = x
-			# layer_id 50 --> recurrent connection to layer_id 44 and 47
-			if i == 44:
+			if i == 13:
 				x_rec1 = x
-			rec_layers2 = [47, 50]
-			if i in rec_layers2:
+			if i in {14, 15}:  # recurrent connection to layer_id 14
 				x = torch.cat((x, x_rec1), dim=1)
 				x_rec1 = x
-		return x
+			if i == 18:
+				x_rec2 = x
+			if i in {19, 20}:  # recurrent connection to layer_id 19
+				x = torch.cat((x, x_rec2), dim=1)
+				x_rec2 = x
+		mean_ch = self.out_mean(x)
+		mean_ch = torch.clamp(mean_ch, min=-1000.0, max=1000.0)
+
+		std_ch = F.softplus(self.out_std(x))
+		std_ch = torch.clamp(std_ch, min=1.0)
+
+		outputs = torch.cat([mean_ch, std_ch], dim=1)
+		return outputs
+
+
+class SmallCNNWithUncertainty(nn.Module):
+	def __init__(self, input_channels=4, input_crop_size=4):
+		super(SmallCNNWithUncertainty, self).__init__()
+		self.conv1 = nn.Conv2d(input_channels, 16, kernel_size=3, stride=1, padding=1)
+		self.relu1 = nn.ReLU()
+		self.batchnorm1 = nn.BatchNorm2d(16)
+		self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+		self.relu2 = nn.ReLU()
+		self.batchnorm2 = nn.BatchNorm2d(32)
+		self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+		self.relu3 = nn.ReLU()
+		self.batchnorm3 = nn.BatchNorm2d(64)
+		image_size = int((input_crop_size * 2) + 1)
+		self.fc_mean = nn.Linear(64 * image_size * image_size, 3)  # Output has 3 dimensions (mean_x, mean_y, mean_z)
+		self.fc_std = nn.Linear(64 * image_size * image_size, 3)  # Output has 3 dimensions (std_x, std_y, std_z)
+		self.fc_weight = nn.Linear(64 * image_size * image_size, 1)  # Output has 1 dimension (weight)
+
+	def forward(self, x):
+		x = self.batchnorm1(self.relu1(self.conv1(x)))
+		x = self.batchnorm2(self.relu2(self.conv2(x)))
+		x = self.batchnorm3(self.relu3(self.conv3(x)))
+		# x = self.relu1(self.conv1(x))
+		# x = self.relu2(self.conv2(x))
+		x = x.reshape(x.size(0), -1)
+		# Output for mean values
+		mean_output = self.fc_mean(x)
+		# Output for standard deviations with Softplus activation
+		std_output = F.softplus(self.fc_std(x))
+		# Output for weight with Sigmoid activation
+		weight_output = torch.sigmoid(self.fc_weight(x))
+		# Concatenate mean and std outputs
+		output = torch.cat((mean_output, std_output, weight_output), dim=1)
+		return output
+
 
 if __name__ == "__main__":
 	from luenn.utils import param_reference
+	# add graph to tensorboard
+	from torch.utils.tensorboard import SummaryWriter
 	param = param_reference()
 	model = UNet()
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	model.to(device)
 	print('model summary: ')
-	summary(model, input_size=(1, 64, 64), batch_size=1)
-
-
-
+	summary(model, input_size=(1, 64, 64), batch_size=-1)
