@@ -8,7 +8,7 @@ Luenn is a powerful Python package built on PyTorch, designed for 3D Single Mole
 
 - **Sampling:** The package includes sampling utilities to efficiently extract training and validation data from large datasets, optimizing the training process.
 
-- **Model Training:** Luenn utilizes a DEep COntext DEpendent (DECODE) neural network to detect and localize emitters at sub-pixel resolution. Training is customizable, allowing users to adapt the model to specific experimental conditions.
+- **Model Training:** Luenn utilizes a Deep Convolutional Neural Network to detect and localize emitters at sub-pixel resolution. Training is customizable, allowing users to adapt the model to specific experimental conditions.
 
 - **Post-Processing Functions:** Luenn offers post-processing functions to enhance and refine localization results, ensuring superior super-resolution reconstructions.
 
