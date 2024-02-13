@@ -23,9 +23,7 @@ class fly_simulator:
 		tar_em, sim_frames, bg_frames = self.sim_train.sample()
 		frame_max = bg_frames.numpy().shape[0]
 		tar_em = tar_em[tar_em.phot > self.param.HyperParameter.emitter_label_photon_min]
-		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide,
-								self.box_size,
-								)
+		y_sim = label_generator(tar_em, frame_max, self.scale_factor, self.z_range, self.slide,self.box_size,)
 		sim_frames = torch.transpose(sim_frames, 2, 1)
 		x_sim = torch.unsqueeze(sim_frames, 1)
 		x_sim = x_sim.cpu()
@@ -84,12 +82,7 @@ class modified_fly_simulator:
 		n_std = n_mean / 4
 		ns = np.random.normal(n_mean, n_std, n_frames)
 		ns = np.round(ns).astype(int)
-		ns = list(np.clip(ns, 1, 100))
-		# print(ns)
-		# ns = list(np.random.randint(max(1,int(n_mean-2*n_std)),int(n_mean+2*n_std),n_frames))
-		# n_min = max(1,int(n_mean-2*n_std))
-		# n_max = int(n_mean+2*n_std)
-		# ns = list(np.random.randint(n_min,n_max,n_frames))
+		ns = list(np.clip(ns, 1))
 		Imean = self.param.Simulation.intensity_mu_sig[0]
 		Isig = self.param.Simulation.intensity_mu_sig[1]
 		x_min = self.param.Simulation.emitter_extent[0][0]
