@@ -82,7 +82,7 @@ class modified_fly_simulator:
 		n_std = n_mean / 4
 		ns = np.random.normal(n_mean, n_std, n_frames)
 		ns = np.round(ns).astype(int)
-		ns = list(np.clip(ns, 1))
+		ns = list(np.clip(ns, 1,10000000))
 		Imean = self.param.Simulation.intensity_mu_sig[0]
 		Isig = self.param.Simulation.intensity_mu_sig[1]
 		x_min = self.param.Simulation.emitter_extent[0][0]

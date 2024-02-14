@@ -69,7 +69,8 @@ class live_trainer:
 
         # Initialize a SummaryWriter for TensorBoard
         self.writer = SummaryWriter(self.path)
-        self.custom_loss = custom_loss(param, writer=self.writer)
+        self.alpha_rate = param.HyperParameter.alpha_rate
+        self.custom_loss = custom_loss(param, alpha_rate=self.alpha_rate, writer=self.writer)
         # add model graph to tensorboard
         self.writer.add_graph(self.model, torch.rand(1, 1, 64, 64).to(self.device1))
 
@@ -88,6 +89,7 @@ class live_trainer:
         self.accumulative_steps = param.HyperParameter.accumulative_steps
         self.pateince = param.HyperParameter.learning_rate_scheduler_param.patience
         self.reduce_rate = param.HyperParameter.learning_rate_scheduler_param.reduce_rate
+        self.norm_clip = param.HyperParameter.norm_clip
         self.train_losses = []
         self.validation_losses = []
 
@@ -215,7 +217,7 @@ class live_trainer:
             loss.backward()
 
             if batch_idx % self.accumulative_steps == 0:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), .05)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.norm_clip)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
@@ -270,9 +272,12 @@ class live_trainer:
             self.writer.add_scalar('Performance/lr', self.scheduler1.get_last_lr()[0], epoch)
             fig = visualize_results(pr_gt_temp, temp_out)
             self.writer.add_figure('predictions', fig, epoch)
+            self.train_losses.append(loss_train)
+            self.validation_losses.append(loss_val)
             if self.mode == 'train':
                 self.metric_cur = loss_val
                 self.save_checkpoint(epoch)
+        return self.model, self.train_losses, self.validation_losses
 
 if __name__ == '__main__':
     from luenn.utils import param_reference

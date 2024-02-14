@@ -19,14 +19,17 @@ class ParallelConv(nn.Module):
 
 
 class UNet(nn.Module):
-	def __init__(self, batch_norm=True):
+	def __init__(self, num_channels_out=64, kernel_size_out=5, var_channel_out=2, combined=False, batch_norm_first=True):
 		super(UNet, self).__init__()
 		self.activation = nn.ELU
 		self.input = ParallelConv()
-
-		def conv_block(in_channels, out_channels):
-			return nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1), nn.BatchNorm2d(out_channels), self.activation())
-
+		self.num_channels_out = num_channels_out
+		self.combined_output = combined
+		def conv_block(in_channels, out_channels, batch_norm_before=batch_norm_first):
+			if batch_norm_before:
+				return nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1), nn.BatchNorm2d(out_channels), self.activation())
+			else:
+				return nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1), self.activation(), nn.BatchNorm2d(out_channels))
 		self.enc = nn.ModuleList([
 			conv_block(128, 64),  # 0
 			conv_block(64, 64),  # 1
@@ -73,10 +76,13 @@ class UNet(nn.Module):
 			conv_block(64 * 2, 64),  # 20
 			conv_block(64 * 3, 256),  # 21
 			conv_block(256, 128),  # 22
-			conv_block(128, 64),  # 23
+			conv_block(128, num_channels_out),  # 23
 		])
-		self.out_mean = nn.Conv2d(64, 2, kernel_size=5, stride=1, padding=2)
-		self.out_std  = nn.Conv2d(64, 2, kernel_size=5, stride=1, padding=2)
+		if self.combined_output:
+			self.out_all = nn.Conv2d(num_channels_out, 2+var_channel_out, kernel_size=kernel_size_out, stride=1, padding=kernel_size_out//2)
+		else:
+			self.out_mean = nn.Conv2d(num_channels_out, 2, kernel_size=kernel_size_out, stride=1, padding=kernel_size_out//2)
+			self.out_std  = nn.Conv2d(num_channels_out, var_channel_out, kernel_size=kernel_size_out, stride=1, padding=kernel_size_out//2)
 
 	def forward(self, x):
 		x = self.input(x)
@@ -99,12 +105,17 @@ class UNet(nn.Module):
 			if i in {19, 20}:  # recurrent connection to layer_id 19
 				x = torch.cat((x, x_rec2), dim=1)
 				x_rec2 = x
-		mean_ch = self.out_mean(x)
-		mean_ch = torch.clamp(mean_ch, min=-1000.0, max=1000.0)
-
-		std_ch = F.softplus(self.out_std(x))
-		std_ch = torch.clamp(std_ch, min=1.0)
-
+		if self.combined_output:
+			outputs = self.out(x)
+			mean_ch = outputs[:, :2, :, :]
+			mean_ch = torch.clamp(mean_ch, min=-1000.0, max=1000.0)
+			std_ch = F.softplus(outputs[:, 2:, :, :])
+			std_ch = torch.clamp(std_ch, min=1.0)
+		else:
+			mean_ch = self.out_mean(x)
+			mean_ch = torch.clamp(mean_ch, min=-1000.0, max=1000.0)
+			std_ch = F.softplus(self.out_std(x))
+			std_ch = torch.clamp(std_ch, min=1.0)
 		outputs = torch.cat([mean_ch, std_ch], dim=1)
 		return outputs
 

@@ -1,24 +1,25 @@
 import torch
 
 class CustomLoss:
-	def __init__(self, param, writer=None):
+	def __init__(self, param, alpha_rate=0.01, writer=None):
 		self.writer = writer
 		self.param = param
 		self.alpha = 0.5
+		self.alpha_rate = alpha_rate
 	def __call__(self, outputs, targets, gt, step=None):
 		mean_channels = outputs[:, 0:2, :, :]
-		var_channels = outputs[:, 2:4, :, :]
+		var_channels = outputs[:, 2:, :, :]
 		num_seeds = len(gt)
-		nll_loss_log = 200*torch.log(var_channels)
-		nll_loss_log = torch.clamp(nll_loss_log, max=1e9)
+		nll_loss_log = 250*torch.log(var_channels)
+		nll_loss_log = torch.clamp(nll_loss_log, max=1e12)
 		nll_loss_log = torch.sum(nll_loss_log) / num_seeds
 		nll_loss_exp = torch.square(mean_channels - targets) / var_channels
-		nll_loss_exp = torch.clamp(nll_loss_exp, max=1e9)
+		nll_loss_exp = torch.clamp(nll_loss_exp, max=1e12)
 		nll_loss_exp = torch.sum(nll_loss_exp) / num_seeds
 		if nll_loss_exp > nll_loss_log:
-			self.alpha -= 0.01
+			self.alpha -= self.alpha_rate
 		else:
-			self.alpha += 0.01
+			self.alpha += self.alpha_rate
 
 		loss = self.alpha * nll_loss_log + (1 - self.alpha) * nll_loss_exp
 

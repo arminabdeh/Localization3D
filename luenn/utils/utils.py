@@ -181,7 +181,6 @@ def param_reference():
 	param_ref.InOut.calibration_file = calib_path
 	return param_ref
 
-
 def visualize_results(pr_gt, temp_out):
 	frame_id = pr_gt['frame_id'].min()
 	frame = temp_out[frame_id - 1, :, :, :]

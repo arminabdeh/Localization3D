@@ -12,7 +12,8 @@ def analyse(model, x_sim, param, progress_bar=True):
 	dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=0)
 	model.eval()
 	steps = len(dataloader_test)
-	tqdm_enum = tqdm(total=steps, smoothing=0.)
+	if progress_bar:
+		tqdm_enum = tqdm(total=steps, smoothing=0.)
 	loc_file = None
 	with torch.no_grad():
 		for inputs in dataloader_test:
