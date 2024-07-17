@@ -7,5 +7,5 @@ from luenn.utils.utils import param_save
 from luenn.utils.utils import generate_unique_filename
 from luenn.utils.utils import auto_scaling
 from luenn.utils.utils import report_performance
-from luenn.utils.utils import visualize_results
+from luenn.utils.utils import visualize_results, visualize_results_corr
 from luenn.utils.utils import param_reference

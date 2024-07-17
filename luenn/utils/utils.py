@@ -94,6 +94,18 @@ def dec_luenn_gt_transform(tar_em):
 
 		for nn, (xyz_data, photon) in enumerate(
 				zip(frame_gt['xyz'], frame_gt['photons'])):
+			xf = xyz_data[1] * 4
+			yf = xyz_data[0] * 4
+			xi = int(xf)
+			yi = int(yf)
+			xm = xf - xi
+			ym = yf - yi
+			if xm >= 0.5:
+				xi += 1
+				xm -= 1
+			if ym >= 0.5:
+				yi += 1
+				ym -= 1
 			gt_frame = {
 				'frame_id': f + 1,
 				'seed_id': nn + 1,
@@ -102,6 +114,8 @@ def dec_luenn_gt_transform(tar_em):
 				'X_tr_nm': xyz_data[0] * 100.0,
 				'Y_tr_nm': xyz_data[1] * 100.0,
 				'Z_tr_nm': xyz_data[2],
+				'i_tr': xi,
+				'j_tr': yi,
 				'photons': photon
 			}
 			gt_list.append(gt_frame)
@@ -163,9 +177,9 @@ def report_performance(gt_pr):
 	print(f'ji is {ji}')
 	print(f'rmse_3d is {rmse_3d / np.sqrt(3)}')
 	print(f'rmse_2d is {rmse_2d / np.sqrt(2)}')
-	print(f'rmse_z is {rmse_z}')
 	print(f'rmse_x is {rmse_x}')
 	print(f'rmse_y is {rmse_y}')
+	print(f'rmse_z is {rmse_z}')
 	print(f'del_x is {del_x}')
 	print(f'del_y is {del_y}')
 	print(f'del_z is {del_z}')
@@ -181,49 +195,125 @@ def param_reference():
 	param_ref.InOut.calibration_file = calib_path
 	return param_ref
 
+
 def visualize_results(pr_gt, temp_out):
 	frame_id = pr_gt['frame_id'].min()
-	frame = temp_out[frame_id - 1, :, :, :]
-	frame_norm = np.sqrt(np.square(frame[:, :, 0]) + np.square(frame[:, :, 1]))
-	frame_phi = np.arccos(frame[:, :, 0] / (frame_norm + 1e-10))
-	var_ch1 = frame[:, :, 2]
-	var_ch2 = frame[:, :, 3]
-	var_total = np.sqrt(var_ch1+var_ch2)
-	var_phi = np.sqrt(var_ch1) / var_total
 	pr_gt_frame = pr_gt[pr_gt['frame_id'] == frame_id]
 	pr_gt_tp = pr_gt_frame[pr_gt_frame['label'] == 'TP']
 	pr_gt_fp = pr_gt_frame[pr_gt_frame['label'] == 'FP']
 	pr_gt_fn = pr_gt_frame[pr_gt_frame['label'] == 'FN']
-	dpi = 100
+
+
+
+	frame = temp_out[frame_id - 1, :, :, :]
+	frame_norm = np.sqrt(np.square(frame[:, :, 0]) + np.square(frame[:, :, 1]))
+	frame_phi = np.arccos(frame[:, :, 0] / (frame_norm + 1e-10))
+	dpi = 150
 	colors = ['red', 'blue', 'violet', 'yellow']
 	plt.rcParams['font.family'] = 'serif'
-	fig, ax = plt.subplots(2, 2, figsize=(10, 10), dpi=dpi)
-	fig.subplots_adjust(wspace=0.1, hspace=0.1)  # Adjust the spacing between subplots
+	figure, ax = plt.subplots(2,2, figsize=(10, 10), dpi=dpi)
+	figure.subplots_adjust(wspace=0.1, hspace=0.1)  # Adjust the spacing between subplots
 	ax[0, 0].imshow(frame_norm, origin='lower')
-	ax[0, 0].set_title(f"prediction norm, min = {np.min(frame_norm):.2f}, max = {np.max(frame_norm):.2f}")
-	ax[0, 1].imshow(frame_phi, origin='lower')
-	ax[0, 1].set_title(f"prediction phi, min = {np.min(frame_phi):.2f}, max = {np.max(frame_phi):.2f}")
-	ax[1, 0].imshow(var_total, origin='lower')
-	ax[1, 0].set_title(f"total variance, min = {np.min(var_total):.2f}, max = {np.max(var_total):.2f}")
-	ax[1, 1].imshow(var_phi, origin='lower')
-	ax[1, 1].set_title(f"z variance, min = {np.min(var_phi):.2f}, max = {np.max(var_phi):.2f}")
+	ax[0, 0].set_title(f"prediction lateral, min = {np.min(frame_norm):.2f}, max = {np.max(frame_norm):.2f}")
+	ax[0, 1].imshow(frame[:, :, 0], origin='lower')
+	ax[0, 1].set_title(f"channel sin, min = {np.min(frame[:, :, 0]):.2f}, max = {np.max(frame[:, :, 0]):.2f}")
+	ax[1, 0].imshow(frame[:, :, 1], origin='lower')
+	ax[1, 0].set_title(f"channel cos, min = {np.min(frame[:, :, 1]):.2f}, max = {np.max(frame[:, :, 1]):.2f}")
+	ax[1, 1].imshow(frame_phi, origin='lower')
+	ax[1, 1].set_title(f"prediction Z, min = {np.min(frame_phi):.2f}, max = {np.max(frame_phi):.2f}")
 	for i in range(2):
 		for j in range(2):
 			ax[i, j].set_xticks([])
 			ax[i, j].set_yticks([])
-			if len(pr_gt_tp) != 0:
-				ax[i, j].scatter(pr_gt_tp.X_tr_px * 4, pr_gt_tp.Y_tr_px * 4, color=colors[0], s=1, label='Ground Truth')
-				ax[i, j].scatter(pr_gt_tp.X_pr_px * 4, pr_gt_tp.Y_pr_px * 4, color=colors[1], s=1, label='Prediction')
-			if len(pr_gt_fp) != 0:
-				ax[i, j].scatter(pr_gt_fp.X_pr_px * 4, pr_gt_fp.Y_pr_px * 4, color=colors[2], s=5,
-								 label='False Positive', marker='X', alpha=0.8)
-			if len(pr_gt_fn) != 0:
-				ax[i, j].scatter(pr_gt_fn.X_tr_px * 4, pr_gt_fn.Y_tr_px * 4, color=colors[3], s=5,
-								 label='False Negative', marker='s', alpha=0.8)
+			if not pr_gt_tp.empty:
+				ax[i, j].scatter(pr_gt_tp.X_tr_px*4., pr_gt_tp.Y_tr_px*4., color=colors[0], s=1, label='Ground Truth')
+				ax[i, j].scatter(pr_gt_tp.X_pr_px*4., pr_gt_tp.Y_pr_px*4., color=colors[1], s=1, label='Prediction')
+			if not pr_gt_fp.empty:
+				ax[i, j].scatter(pr_gt_fp.X_pr_px*4., pr_gt_fp.Y_pr_px*4., color=colors[2], s=5, label='False Positive', marker='X', alpha=0.8)
+			if not pr_gt_fn.empty:
+				ax[i, j].scatter(pr_gt_fn.X_tr_px*4., pr_gt_fn.Y_tr_px*4., color=colors[3], s=5, label='False Negative', marker='s', alpha=0.8)
+
+	return figure
+
+def visualize_results_corr(pr_gt):
+
+	pr_gt_scatter = pr_gt.copy()
+	pr_gt_scatter = pr_gt_scatter[pr_gt_scatter['label'] == 'TP']
+
+	if pr_gt_scatter.empty:
+		pr_gt_scatter = pd.DataFrame({'X_tr_nm': [], 'Y_tr_nm': [], 'Z_tr_nm': [],
+									  'X_pr_nm': [], 'Y_pr_nm': [], 'Z_pr_nm': [],
+									  'X_var': [], 'Y_var': [], 'Z_var': [],'var_3d': [], 'var_2d': []})
+	# errors
+	pr_gt_scatter['x_err'] = abs(pr_gt_scatter.X_tr_nm - pr_gt_scatter.X_pr_nm)
+	pr_gt_scatter['y_err'] = abs(pr_gt_scatter.Y_tr_nm - pr_gt_scatter.Y_pr_nm)
+	pr_gt_scatter['z_err'] = abs(pr_gt_scatter.Z_tr_nm - pr_gt_scatter.Z_pr_nm)
+	pr_gt_scatter['tot_err'] = np.sqrt(pr_gt_scatter['x_err'] ** 2 + pr_gt_scatter['y_err'] ** 2 + pr_gt_scatter['z_err'] ** 2)
+	pr_gt_scatter['lat_err'] = np.sqrt(pr_gt_scatter['x_err'] ** 2 + pr_gt_scatter['y_err'] ** 2)
+	pr_gt_scatter['X_var'] = abs(pr_gt_scatter['X_var'].values)
+	pr_gt_scatter['Y_var'] = abs(pr_gt_scatter['Y_var'].values)
+	pr_gt_scatter['Z_var'] = abs(pr_gt_scatter['Z_var'].values)
+	# Calculate the correlation between x_err and y_err
+	corr_total = pr_gt_scatter[['tot_err', 'var_3d']].corr()
+	print(f"correlation total variance: \n{corr_total}")
+	cor_x = pr_gt_scatter[['x_err', 'X_var']].corr()
+	print(f"correlation x variance: \n{cor_x}")
+	cor_y = pr_gt_scatter[['y_err', 'Y_var']].corr()
+	print(f"correlation y variance: \n{cor_y}")
+	cor_z = pr_gt_scatter[['z_err', 'Z_var']].corr()
+	print(f"correlation z variance: \n{cor_z}")
+
+	print('report:')
+	print('\033[1m' + 'X Direction' + '\033[0m')
+	print(f" ERR ==>  mean: {pr_gt_scatter['x_err'].mean()}, max: {pr_gt_scatter['x_err'].max()}, min: {pr_gt_scatter['x_err'].min()}")
+	print(f" VAR ==>  mean: {pr_gt_scatter['X_var'].mean()}, max: {pr_gt_scatter['X_var'].max()}, min: {pr_gt_scatter['X_var'].min()}")
+	print('\033[1m' + 'Y Direction' + '\033[0m')
+	print(f" ERR ==>  mean: {pr_gt_scatter['y_err'].mean()}, max: {pr_gt_scatter['y_err'].max()}, min: {pr_gt_scatter['y_err'].min()}")
+	print(f" VAR ==>  mean: {pr_gt_scatter['Y_var'].mean()}, max: {pr_gt_scatter['Y_var'].max()}, min: {pr_gt_scatter['Y_var'].min()}")
+	print('\033[1m' + 'Z Direction' + '\033[0m')
+	print(f" ERR ==>  mean: {pr_gt_scatter['z_err'].mean()}, max: {pr_gt_scatter['z_err'].max()}, min: {pr_gt_scatter['z_err'].min()}")
+	print(f" VAR ==>  mean: {pr_gt_scatter['Z_var'].mean()}, max: {pr_gt_scatter['Z_var'].max()}, min: {pr_gt_scatter['Z_var'].min()}")
+	print('\033[1m' + 'LATERAL' + '\033[0m')
+	print(f" ERR ==>  mean: {pr_gt_scatter['lat_err'].mean()}, max: {pr_gt_scatter['lat_err'].max()}, min: {pr_gt_scatter['lat_err'].min()}")
+	print(f" VAR ==>  mean: {pr_gt_scatter['var_2d'].mean()}, max: {pr_gt_scatter['var_2d'].max()}, min: {pr_gt_scatter['var_2d'].min()}")
+	print('\033[1m' + 'TOTAL' + '\033[0m')
+	print(f" ERR ==>  mean: {pr_gt_scatter['tot_err'].mean()}, max: {pr_gt_scatter['tot_err'].max()}, min: {pr_gt_scatter['tot_err'].min()}")
+	print(f" VAR ==>  mean: {pr_gt_scatter['var_3d'].mean()}, max: {pr_gt_scatter['var_3d'].max()}, min: {pr_gt_scatter['var_3d'].min()}")
+	print('-' * 50)
+
+	figure, ax = plt.subplots(2, 2, figsize=(8, 8), dpi=80)
+	figure.subplots_adjust(wspace=0.1, hspace=0.1)  # Adjust the spacing between subplots
+	titles = ['Error 3D', 'Error 2D', 'Error Z', 'Error X']
+	ylabels = ['Variance 3D', 'Variance 2D', 'Variance Z', 'Variance X']
+	xlabels = ['Error 3D', 'Error 2D', 'Error Z', 'Error X']
+
+	ax[0, 0].scatter(pr_gt_scatter['tot_err'], pr_gt_scatter['var_3d'], color='black', s=4, label='3D', alpha=0.5)
+	ax[0, 0].plot([0, max(pr_gt_scatter['tot_err'].max(),pr_gt_scatter['var_3d'].max())],
+				  [0, max(pr_gt_scatter['tot_err'].max(),pr_gt_scatter['var_3d'].max())], color='blue', linestyle='--', alpha=0.5)
+
+	ax[0, 1].scatter(pr_gt_scatter['lat_err'], pr_gt_scatter['var_2d'], color='blue', s=4, label='Lateral', alpha=0.5)
+	ax[0, 1].plot([0, max(pr_gt_scatter['lat_err'].max(),pr_gt_scatter['var_2d'].max())],
+				  [0, max(pr_gt_scatter['lat_err'].max(),pr_gt_scatter['var_2d'].max())], color='blue', linestyle='--', alpha=0.5)
+
+	ax[1, 0].scatter(pr_gt_scatter['z_err'], pr_gt_scatter['Z_var'], color='green', s=4, label='Z direction', alpha=0.5)
+	ax[1, 0].plot([0, max(pr_gt_scatter['z_err'].max(),pr_gt_scatter['Z_var'].max())],
+				  [0, max(pr_gt_scatter['z_err'].max(),pr_gt_scatter['Z_var'].max())], color='blue', linestyle='--', alpha=0.5)
+
+	ax[1, 1].scatter(abs(pr_gt_scatter['x_err']), pr_gt_scatter['X_var'], color='red', s=3, label='X direction', alpha=0.4)
+	ax[1, 1].scatter(abs(pr_gt_scatter['y_err'].abs()), pr_gt_scatter['Y_var'].abs(), color='blue', s=3, label='Y direction', alpha=0.4)
+	ax[1, 1].plot([0, max(pr_gt_scatter['x_err'].max(),pr_gt_scatter['X_var'].max(),pr_gt_scatter['Y_var'].max(),pr_gt_scatter['y_err'].max())],
+				  [0, max(pr_gt_scatter['x_err'].max(),pr_gt_scatter['X_var'].max(),pr_gt_scatter['Y_var'].max(),pr_gt_scatter['y_err'].max())], color='blue', linestyle='--', alpha=0.5)
+
+
+	for i in range(2):
+		for j in range(2):
+			ax[i, j].set_xlabel(xlabels[i*2+j])
+			ax[i, j].set_ylabel(ylabels[i*2+j])
+			ax[i, j].set_title(titles[i*2+j])
+			ax[i, j].legend()
 	plt.tight_layout()
 	plt.close('all')
-	return fig
-
+	return figure
 
 def pre_trained_model():
 	dir = os.path.dirname(os.path.dirname(__file__))

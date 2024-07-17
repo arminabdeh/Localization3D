@@ -3,18 +3,20 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from luenn.generic import modified_fly_simulator as fly_simulator
+from luenn.generic import fly_simulator
 from luenn.live_engine.data_loader_stream import data_loader_stream
+from luenn.utils import param_save
+from luenn.utils import report_performance
+
 from luenn.localization import localizer_machine
 from luenn.model.model import UNet
-from luenn.utils import param_save, auto_scaling
-from luenn.utils import visualize_results, report_performance
 from luenn.live_engine.loss import CustomLoss as custom_loss
+from luenn.utils import visualize_results
+# from luenn.utils import visualize_results_corr
 
 
 # Note
@@ -27,11 +29,16 @@ class live_trainer:
         self.param = param
         self.path = None
         self.device1 = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.device2 = torch.device(
-            "cuda:1" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else self.device1)
+        self.device2 = torch.device("cuda:1" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else self.device1)
+        if not torch.cuda.is_available():
+            self.param.Hardware.num_worker_train = 0
+            self.param.Hardware.torch_threads = 0
+            self.param.Hardware.device_simulation = 'cpu'
+
         # Initialize the model
         if model_initial is not None:
             self.model = model_initial
+            print('Model loaded')
         else:
             self.model = UNet()
 
@@ -63,18 +70,10 @@ class live_trainer:
             self.path = os.path.join(os.getcwd(), 'runs', dir)
         os.makedirs(self.path, exist_ok=True)
 
-        # Set checkpoint and model save paths
         self.checkpoint_save_path = os.path.join(self.path, param.InOut.model_check)
         self.model_save_path = os.path.join(self.path, param.InOut.model_out)
-
-        # Initialize a SummaryWriter for TensorBoard
         self.writer = SummaryWriter(self.path)
-        self.alpha_rate = param.HyperParameter.alpha_rate
-        self.custom_loss = custom_loss(param, alpha_rate=self.alpha_rate, writer=self.writer)
-        # add model graph to tensorboard
-        self.writer.add_graph(self.model, torch.rand(1, 1, 64, 64).to(self.device1))
-
-        # Initialize simulator and other training-related parameters
+        self.custom_loss = custom_loss(writer=self.writer)
         self.simulator = fly_simulator(param, report=False)
         self.metric_cur = 0
         self.metric_min = float('inf')
@@ -94,21 +93,30 @@ class live_trainer:
         self.validation_losses = []
 
     def __del__(self):
-        # Ensure that the SummaryWriter is closed when the training is finished
         if hasattr(self, 'writer'):
             self.writer.close()
 
-    def create_optimizer_and_schedulers(self):
-        beta1 = self.param.HyperParameter.optimizer_param.beta1
-        beta2 = self.param.HyperParameter.optimizer_param.beta2
-        weight_decay = self.param.HyperParameter.optimizer_param.weight_decay
-        amsgrad = self.param.HyperParameter.optimizer_param.amsgrad
-        self.optimizer = getattr(torch.optim, "AdamW")(self.model.parameters(), lr=self.lr, betas=(beta1, beta2),
-                                                       eps=1e-08, weight_decay=weight_decay, amsgrad=amsgrad)
+    def create_optimizer_and_schedulers(self,warmup=False):
+        if warmup:
+            lr_warmup = 0.0010
+            step = 1
+            gamma = 0.99
+            self.optimizer = getattr(torch.optim, "AdamW")(self.model.parameters(), lr=lr_warmup, betas=(0.9, 0.999),
+                                                              eps=1e-08, weight_decay=0.01, amsgrad=False)
+            self.scheduler1 = lr_scheduler.StepLR(self.optimizer, step, gamma)
+            self.scheduler2 = lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min', patience=self.pateince, verbose=True, factor=self.reduce_rate)
 
-        # Create schedulers
-        self.scheduler1 = lr_scheduler.StepLR(self.optimizer, self.step_size, self.gamma)
-        self.scheduler2 = lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min', patience=self.pateince, verbose=True, factor=self.reduce_rate)
+        else:
+            beta1 = self.param.HyperParameter.optimizer_param.beta1
+            beta2 = self.param.HyperParameter.optimizer_param.beta2
+            weight_decay = self.param.HyperParameter.optimizer_param.weight_decay
+            amsgrad = self.param.HyperParameter.optimizer_param.amsgrad
+            self.optimizer = getattr(torch.optim, "AdamW")(self.model.parameters(), lr=self.lr, betas=(beta1, beta2),
+                                                           eps=1e-08, weight_decay=weight_decay, amsgrad=amsgrad)
+
+            # Create schedulers
+            self.scheduler1 = lr_scheduler.StepLR(self.optimizer, self.step_size, self.gamma)
+            self.scheduler2 = lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min', patience=self.pateince, verbose=True, factor=self.reduce_rate)
 
     def save_checkpoint(self, epoch_cur):
         print('*' * 50)
@@ -142,31 +150,29 @@ class live_trainer:
     def validate(self, dataloader_test, gt_test):
         print('Validation started')
         self.model.eval()
-
         steps = len(dataloader_test)
         tqdm_enum = tqdm(total=steps, smoothing=0.)
         val_loss = 0
         pr_gt_total = pd.DataFrame([])
         example = None
-        example_pr_gt = None
-
         with torch.no_grad():
             for idx, data in enumerate(dataloader_test):
                 frame_id_batch_start = int(idx * self.batch_size)
                 frame_id_batch_end = int(frame_id_batch_start + self.batch_size)
-                gt_batch = gt_test[gt_test['frame_id'].between(frame_id_batch_start + 1, frame_id_batch_end)]
-
+                gt_batch = gt_test[gt_test['frame_id'].between(frame_id_batch_start + 1, frame_id_batch_end)].copy()
+                gt_batch['frame_id'] -= gt_batch['frame_id'].min() - 1
                 inputs, labels = data['x'].to(self.device1), data['y'].to(self.device2)
                 outputs = self.model(inputs)
                 outputs = outputs.to(self.device2)
 
-                loss = self.custom_loss(outputs, labels, gt=gt_batch)
-                val_loss += loss.item()
+                pr_gt_batch = localizer_machine(outputs, gt=gt_batch, save=False, param=self.param).localization_3D()
+                loss = self.custom_loss(predictions=outputs, targets=labels, num_seeds=len(gt_batch))
+                pr_gt_batch['frame_id'] += frame_id_batch_start
 
-                outputs = outputs.cpu().numpy()
-                outputs = np.moveaxis(outputs, 1, -1)
-                pr_gt_temp = localizer_machine(outputs, gt=gt_batch, save=False, param=self.param).localization_3D()
-                pr_gt_total = pd.concat([pr_gt_total, pr_gt_temp])
+                pr_gt_total = pd.concat([pr_gt_total, pr_gt_batch])
+                pr_gt_total = pr_gt_total.reset_index(drop=True)
+
+                val_loss += loss.item()
 
                 inputs = inputs.cpu()
                 labels = labels.cpu()
@@ -174,53 +180,75 @@ class live_trainer:
                 tqdm_enum.update(1)
 
                 if idx == 0:
+                    outputs = outputs.cpu().numpy()
+                    outputs = np.moveaxis(outputs, 1, -1)
                     ex_labels = labels.cpu().numpy()
                     ex_labels = np.moveaxis(ex_labels, 1, -1)
                     example = np.concatenate((outputs, ex_labels), axis=-1)
-                    example_pr_gt = pr_gt_temp
-
         tqdm_enum.close()
         val_loss /= steps
-        return val_loss, pr_gt_total, example, example_pr_gt
+        return val_loss, pr_gt_total, example
 
-
-    def train_one_epoch(self, dataloader_train, gt_train, epochs=0, warmup=False):
-        if warmup:
-            print('Warmup started')
-        else:
-            print(f'Training epoch {epochs + 1}')
+    def warmup(self):
+        num_loops = 1
+        print(f'warmup started')
+        self.model.train()
+        self.create_optimizer_and_schedulers(warmup=True)
+        for lp in range(num_loops):
+            print(f'warmup loop {lp + 1} of {num_loops}')
+            dataloader_train, dataloader_test, gt_test, gt_train = self.data_loader()
+            steps = len(dataloader_train)
+            tqdm_enum = tqdm(total=steps, smoothing=0.)
+            train_loss = 0
+            for batch_idx, data in enumerate(dataloader_train):
+                frame_id_batch_start = int(batch_idx * self.batch_size)
+                frame_id_batch_end = int(frame_id_batch_start + self.batch_size)
+                gt_batch = gt_train[gt_train['frame_id'].between(frame_id_batch_start + 1, frame_id_batch_end)].copy()
+                gt_batch['frame_id'] -= gt_batch['frame_id'].min() - 1
+                inputs, labels = data['x'].to(self.device1), data['y'].to(self.device2)
+                outputs = self.model(inputs)
+                outputs = outputs.to(self.device2)
+                loss = self.custom_loss(predictions=outputs, targets=labels, num_seeds=len(gt_batch))
+                train_loss += loss.item()
+                loss.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                self.scheduler1.step()
+                inputs = inputs.cpu()
+                labels = labels.cpu()
+                torch.cuda.empty_cache()
+                tqdm_enum.update(1)
+            tqdm_enum.close()
+            train_loss /= steps
+            print(f'warmup loop {lp + 1} finished with loss {train_loss:.4f}')
+        print(f'warmup finished')
+    def train_one_epoch(self, dataloader_train, gt_train, epochs=0):
+        print(f'Training epoch {epochs + 1}')
         self.model.train()
         steps = len(dataloader_train)
         tqdm_enum = tqdm(total=steps, smoothing=0.)
         train_loss = 0
-
-
         for batch_idx, data in enumerate(dataloader_train):
             global_steps = batch_idx + epochs * steps
             frame_id_batch_start = int(batch_idx * self.batch_size)
             frame_id_batch_end = int(frame_id_batch_start + self.batch_size)
-            gt_batch = gt_train[gt_train['frame_id'].between(frame_id_batch_start + 1, frame_id_batch_end)]
-
+            gt_batch = gt_train[gt_train['frame_id'].between(frame_id_batch_start + 1, frame_id_batch_end)].copy()
+            gt_batch['frame_id'] -= gt_batch['frame_id'].min() - 1
             inputs, labels = data['x'].to(self.device1), data['y'].to(self.device2)
             outputs = self.model(inputs)
             outputs = outputs.to(self.device2)
-            if warmup:
-                loss = self.custom_loss(outputs, labels, gt_batch, step=None)
-            else:
-                loss = self.custom_loss(outputs, labels, gt_batch, step=global_steps)
+            loss = self.custom_loss(predictions=outputs, targets=labels, num_seeds=len(gt_batch), step=global_steps)
             train_loss += loss.item()
             loss = loss / self.accumulative_steps
             if torch.isnan(loss):
                 print('nan encountered')
                 continue
-
-            loss.backward()
-
             if batch_idx % self.accumulative_steps == 0:
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.norm_clip)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
-
+                self.scheduler1.step()
             tqdm_enum.update(1)
             inputs = inputs.cpu()
             labels = labels.cpu()
@@ -228,18 +256,16 @@ class live_trainer:
 
         tqdm_enum.close()
         train_loss /= steps
-        if warmup:
-            print(f'Warmup finished with loss {train_loss:.4f} per seed')
         return train_loss
 
     def train(self):
         torch.cuda.empty_cache()
         filename = os.path.join(self.path, 'param_in.yaml')
         param_save(self.param, filename)
-        self.create_optimizer_and_schedulers()
-        dataloader_train, dataloader_test, gt_test, gt_train = self.data_loader()
-        warmup_loss = self.train_one_epoch(dataloader_train, gt_train, epochs=0, warmup=True)
+
+        self.warmup()
         print('training started')
+        self.create_optimizer_and_schedulers()
         for epoch in range(self.epoch_start, self.num_epochs):
             if (epoch + 1) % self.restart_epochs == 0 and epoch != 0:
                 print('-' * 50)
@@ -248,9 +274,12 @@ class live_trainer:
                 self.simulator = fly_simulator(self.param, report=False)
             dataloader_train, dataloader_test, gt_test, gt_train = self.data_loader()
             loss_train = self.train_one_epoch(dataloader_train, gt_train, epochs=epoch)
-            loss_val, pr_gt, temp_out, pr_gt_temp = self.validate(dataloader_test, gt_test)
-            self.scheduler1.step()
-            self.scheduler2.step(loss_val)
+            loss_val, pr_gt, temp_out = self.validate(dataloader_test, gt_test)
+            # condition for minimum lr reached stop scheduler
+            if self.scheduler1.get_last_lr()[0] > 1e-8:
+                self.scheduler1.step()
+                self.scheduler2.step(loss_val)
+
             print(f'epoch {epoch + 1} finished')
             print(f'Train Loss: {loss_train:.4f} --------- Validation Loss: {loss_val:.4f}')
             print(f'epoch summary:')
@@ -270,8 +299,10 @@ class live_trainer:
             self.writer.add_scalar('Performance/dely', dely, epoch)
             self.writer.add_scalar('Performance/delz', delz, epoch)
             self.writer.add_scalar('Performance/lr', self.scheduler1.get_last_lr()[0], epoch)
-            fig = visualize_results(pr_gt_temp, temp_out)
-            self.writer.add_figure('predictions', fig, epoch)
+            fig1 = visualize_results(pr_gt, temp_out)
+            # fig2 = visualize_results_corr(pr_gt)
+            self.writer.add_figure('predictions1', fig1, epoch)
+            # self.writer.add_figure('predictions2', fig2, epoch)
             self.train_losses.append(loss_train)
             self.validation_losses.append(loss_val)
             if self.mode == 'train':
@@ -279,19 +310,18 @@ class live_trainer:
                 self.save_checkpoint(epoch)
         return self.model, self.train_losses, self.validation_losses
 
-if __name__ == '__main__':
-    from luenn.utils import param_reference
-    param = param_reference()
-    param.Simulation.scale_factor = 1000.0
-    param.Simulation.emitter_av = 10
-    param.HyperParameter.pseudo_ds_size = 512
-    param.HyperParameter.batch_size = 2
-    param.HyperParameter.epochs = 1000
-    param.HyperParameter.restart_period = 20
-    param.TestSet.test_size = 128
-    param.Hardware.num_worker_train = 4
-    param.HyperParameter.lr = 0.00080
-    param.Simulation.label_slide = True
-    param.Simulation.intensity_mu_sig = [20000, 1000]
-    param = auto_scaling(param)
-    live_trainer(param,dir='hsnr_ld3',mode='debug').train()
+# if __name__ == '__main__':
+#     from luenn.utils import param_reference
+#     param = param_reference()
+#     param.Simulation.emitter_av = 10
+#     param.HyperParameter.pseudo_ds_size = 512
+#     param.HyperParameter.batch_size = 2
+#     param.HyperParameter.epochs = 1000
+#     param.HyperParameter.restart_period = 20
+#     param.TestSet.test_size = 128
+#     param.Hardware.num_worker_train = 4
+#     param.HyperParameter.lr = 0.00080
+#     param.Simulation.label_slide = True
+#     param.Simulation.intensity_mu_sig = [20000, 1000]
+#     param = auto_scaling(param)
+#     live_trainer(param,dir='hsnr_ld3',mode='debug').train()

@@ -1,5 +1,6 @@
 import numpy as np
-
+import pandas as pd
+from scipy.signal import peak_widths
 
 class reg_classification:
 	def __init__(self, res_loc):
@@ -9,9 +10,9 @@ class reg_classification:
 			self.TP = 0
 			self.FP = 0
 			self.FN = 0
-			self.xe = 0
-			self.ye = 0
-			self.ze = 0
+			self.xe = np.inf
+			self.ye = np.inf
+			self.ze = np.inf
 		else:
 			self.TP = len(res_loc[res_loc.label == 'TP'])
 			self.FP = len(res_loc[res_loc.label == 'FP'])
@@ -91,8 +92,9 @@ class reg_classification:
 		return np.mean(np.abs(self.ze))
 
 	def efficiency_lateral(self):
+		rmse_lat_norm = self.rmse_2d() / np.sqrt(2)
 		t1 = (1 - (self.jaccardian_index() * 0.01)) ** 2
-		t2 = ((self.rmse_2d() ** 2) * 2) * (.01 ** 2)
+		t2 = ((rmse_lat_norm ** 2) * 2) * (.01 ** 2)
 		return (1 - np.sqrt(t1 + t2)) * 100.
 
 	def efficiency_axial(self):
@@ -136,58 +138,47 @@ class reg_classification:
 		ratio = ratio.reshape(int(ratio.shape[0] ** 0.5), int(ratio.shape[0] ** 0.5))
 		return ratio
 
-# class axial_recall(res_loc, step_z,param):
-# 	self.res_loc = res_loc
-# 	self.step_z = step_z
-# 	self.param = param
-# 	def stepwise_recall(self):
-# 		processed_dataframe = self.res_loc.copy()
-# 		res = []
-# 		consolidated_Z = {'Z_min': [], 'Z_max': [], 'Z_ave': [], 'Recall': []}
-# 		processed_dataframe_filter = processed_dataframe[
-# 		(processed_dataframe['label'] == 'TP') | (processed_dataframe['label'] == 'FN')]
-# 		axial_range = self.param.Simulation.axial_range
-# 		l = int(axial_range / step_z)
-# 		for zs in range(0, l):
-# 			Z_tr_nm_min = (zs * step_z) - (axial_range / 2.)
-# 			Z_tr_nm_max = Z_tr_nm_min + step_z
-# 			processed_dataframe_Z = processed_dataframe_filter[
-# 				(processed_dataframe_filter.Z_tr_nm >= Z_tr_nm_min) & (processed_dataframe_filter.Z_tr_nm < Z_tr_nm_max)]
-# 			if processed_dataframe_Z.empty:
-# 				recall_z = consolidated_Z.copy()
-# 			else:
-# 				re
-# 				recall = self.reg
-# 				classification(processed_dataframe_Z).recall()
-# 				recall_z = consolidated_Z.copy()
-# 				recall_z['Z_min'] = Z_tr_nm_min
-# 				recall_z['Z_max'] = Z_tr_nm_max
-# 				recall_z['Z_ave'] = (Z_tr_nm_min + Z_tr_nm_max) / 2.
-# 				recall_z['Recall'] = recall
-# 			res.append(recall_z)
-# 		return pd.DataFrame(res)
-# 	def consolidated_z_range(self):
-# 		recalls_dense = self.stepwise_recall()
-# 		axial_range = self.param.Simulation.axial_range
-# 		Zmax_id = np.argmax(recalls_dense.Recall)
-# 		Zmax    = recalls_dense.Z_ave.to_list()[Zmax_id]
-# 		Rmax    = recalls_dense.Recall.to_list()[Zmax_id]
-# 		res    = peak_widths(np.array(recalls_dense.Recall),[Zmax_id],rel_height=0.5)
-# 		Z_step = recalls_dense.Z_ave.to_list()[1]- recalls_dense.Z_ave.to_list()[0]
-# 		Z_min  = recalls_dense.Z_ave.to_list()[0]
-# 		left_min_recall = recalls_dense.Recall[0:Zmax_id].min()
-# 		right_min_recall = recalls_dense.Recall[Zmax_id:].min()
-# 		left_sign = (Rmax/2.) - left_min_recall
-# 		right_sign = (Rmax/2.) - right_min_recall
-# 		if left_sign<=0.:
-# 			zh_min = -(axial_range/2.)
-# 		else:
-# 			zh_min = ((res[2]*Z_step)-(axial_range/2.))[0]
-# 		if right_sign<=0.:
-# 			zh_max = axial_range/2.
-# 		else:
-# 			zh_max = ((res[3]*Z_step)-(axial_range/2.))[0]
-# 		FWHM = zh_max-zh_min
-# 		ConsZR = FWHM*Rmax
-# 		return Zmax, Rmax, FWHM, ConsZR
-#
+	def consolidated_z_range(self,step_z=20.,axial_range=1500.):
+		res = []
+
+		consolidated_Z = {'Z_min': [], 'Z_max': [], 'Z_ave': [], 'recall': []}
+		processed_dataframe = self.res_loc[self.res_loc['label'] !='FP']
+
+		l = int(axial_range / step_z)
+
+		for zs in range(0, l):
+			Z_down_lim = (zs * step_z) - (axial_range / 2.)
+			Z_up_lim = Z_down_lim + step_z
+			step_df = processed_dataframe[(processed_dataframe['Z_tr_nm'] >= Z_down_lim) & (processed_dataframe['Z_tr_nm'] < Z_up_lim)]
+			if step_df.empty:
+				recall_z = consolidated_Z.copy()
+			else:
+				recall = reg_classification(step_df).recall()
+				recall_z = consolidated_Z.copy()
+				recall_z['Z_min'] = Z_down_lim
+				recall_z['Z_max'] = Z_up_lim
+				recall_z['Z_ave'] = (Z_down_lim + Z_up_lim) / 2.
+				recall_z['Recall'] = recall
+			res.append(recall_z)
+		res = pd.DataFrame(res)
+		Zmax_id = np.argmax(res.Recall)
+		Zmax = res.Z_ave.to_list()[Zmax_id]
+		Rmax = res.Recall.to_list()[Zmax_id]
+		res = peak_widths(np.array(res.Recall), [Zmax_id], rel_height=0.5)
+		Z_step = res.Z_ave.to_list()[1] - res.Z_ave.to_list()[0]
+		Z_min = res.Z_ave.to_list()[0]
+		left_min_recall = res.Recall[0:Zmax_id].min()
+		right_min_recall = res.Recall[Zmax_id:].min()
+		left_sign = (Rmax / 2.) - left_min_recall
+		right_sign = (Rmax / 2.) - right_min_recall
+		if left_sign <= 0.:
+			zh_min = -(axial_range / 2.)
+		else:
+			zh_min = ((res[2] * Z_step) - (axial_range / 2.))[0]
+		if right_sign <= 0.:
+			zh_max = axial_range / 2.
+		else:
+			zh_max = ((res[3] * Z_step) - (axial_range / 2.))[0]
+		FWHM = zh_max - zh_min
+		ConsZR = FWHM * Rmax
+		return Zmax, Rmax, FWHM, ConsZR
