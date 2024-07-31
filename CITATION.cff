@@ -1,0 +1,36 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: LUENN
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Armin
+    family-names: Abdehkakha
+    email: arminabd@buffalo.edu
+    affiliation: University at Buffalo
+  - given-names: Craig
+    family-names: Snoeyink
+    email: craigsno@buffalo.edu
+    affiliation: University at Buffalo
+    orcid: 'https://orcid.org/0000-0001-7215-2554'
+repository-code: 'https://github.com/arminabdeh/LUENN_tf_version'
+abstract: >-
+  The development of Single-Molecule Localization Microscopy
+  (SMLM) has enabled the visualization of sub-cellular
+  structures, but its temporal resolution is limited. To
+  address this issue, a deep-convolutional neural network
+  called LUENN has been introduced, which uses a unique
+  architecture that rejects the isolated emitter assumption.
+  LUENN is a Python package based on a deep CNN that
+  utilizes the Tensorflow tool for SMLM. It is capable of
+  achieving high accuracy for a wide range of imaging
+  modalities and frame densities. 
+keywords:
+  - Convolutional Neural Network
+  - Single Molecule Localization Microscopy
+  - Super-Resolution Microscopy
+license: MIT
